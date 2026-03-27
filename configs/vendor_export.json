@@ -1,0 +1,11 @@
+{
+  "app": {
+    "backend": "win32",
+    "window_title_regex": ".*Vendor.*",
+    "exe_path": "C:\\Program Files\\Vendor\\App.exe"
+  },
+  "export": {
+    "output_dir": "C:\\solvent_exports"
+  },
+  "workflow": []
+}
