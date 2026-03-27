@@ -98,12 +98,22 @@ def run_trainer(backend: str = "win32") -> int:
                     "control_type": control_meta.get("control_type"),
                     "class_name": control_meta.get("class_name"),
                     "automation_id": control_meta.get("automation_id"),
+                    "control_id": control_meta.get("control_id"),
+                    "framework_id": control_meta.get("framework_id"),
+                    "process_id": control_meta.get("process_id"),
+                    "title_regex": _make_title_regex(control_meta.get("name")),
+                    "found_index": int(choice),
+                    "coordinates": control_meta.get("click_point"),
                 },
                 action=action,
                 value=value,
                 delay_after=delay_after,
                 retries=retries,
-                window_matcher={"title": selected_window["title"]},
+                window_matcher={
+                    "title": selected_window.get("title"),
+                    "class_name": selected_window.get("class_name"),
+                    "handle": selected_window.get("handle"),
+                },
             )
         )
         print(f"Step saved in session. Total steps: {len(workflow_steps)}")
@@ -129,3 +139,12 @@ def _save_workflow(backend: str, selected_window: dict, workflow_steps: list) ->
     save_json(config_path, config)
     print(f"Saved workflow to {config_path}")
     return 0
+
+
+def _make_title_regex(name: str | None) -> str | None:
+    if not name:
+        return None
+    escaped = "".join(f"\\{char}" if char in r".^$*+?{}[]|()" else char for char in name.strip())
+    if not escaped:
+        return None
+    return f".*{escaped}.*"
