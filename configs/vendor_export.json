@@ -7,5 +7,11 @@
   "export": {
     "output_dir": "C:\\solvent_exports"
   },
-  "workflow": []
+  "workflow": [],
+  "alerts": {
+    "enabled": false,
+    "failure_threshold": 3,
+    "sla_hours": 24,
+    "output_path": "alerts"
+  }
 }

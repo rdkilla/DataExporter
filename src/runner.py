@@ -1,5 +1,7 @@
+import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from pywinauto import Application, Desktop
@@ -7,6 +9,9 @@ from pywinauto import Application, Desktop
 from src.actions import perform_action
 from src.config_io import load_json
 from src.utils import make_output_file
+
+_ALERT_STATE_FILE = ".data_exporter_alert_state.json"
+_EVENT_LOG_SOURCE = "DataExporter"
 
 
 def _connect_window(app_cfg: dict):
@@ -102,8 +107,111 @@ def _resolve_step_window(default_window, app_cfg: dict, step_window_cfg: dict | 
     return step_window
 
 
-def run_workflow(config_path: str) -> int:
-    cfg = load_json(config_path)
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _to_iso8601(value: datetime) -> str:
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _from_iso8601(value: str | None) -> datetime | None:
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        logging.warning("Could not parse timestamp in alert state: %s", value)
+        return None
+
+
+def _write_windows_event_log(message: str, *, event_type: str = "error") -> None:
+    try:
+        import win32evtlog  # type: ignore
+        import win32evtlogutil  # type: ignore
+    except Exception:
+        logging.info("Windows Event Log libraries unavailable; skipping Event Log write")
+        return
+
+    event_map = {
+        "error": win32evtlog.EVENTLOG_ERROR_TYPE,
+        "warning": win32evtlog.EVENTLOG_WARNING_TYPE,
+        "info": win32evtlog.EVENTLOG_INFORMATION_TYPE,
+    }
+    safe_event_type = event_map.get(event_type, win32evtlog.EVENTLOG_ERROR_TYPE)
+
+    try:
+        win32evtlogutil.ReportEvent(
+            appName=_EVENT_LOG_SOURCE,
+            eventID=1000,
+            eventCategory=0,
+            eventType=safe_event_type,
+            strings=[message],
+            data=b"",
+        )
+    except Exception:
+        logging.exception("Failed writing Windows Event Log entry")
+
+
+def _write_alert_file(output_path: Path, *, alert_kind: str, message: str, metadata: dict | None = None) -> Path:
+    output_path.mkdir(parents=True, exist_ok=True)
+    ts = _utc_now().strftime("%Y%m%dT%H%M%SZ")
+    alert_file = output_path / f"alert_{alert_kind}_{ts}.json"
+    payload = {
+        "alert_type": alert_kind,
+        "message": message,
+        "created_utc": _to_iso8601(_utc_now()),
+        "metadata": metadata or {},
+    }
+    alert_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return alert_file
+
+
+def _load_alert_state(output_path: Path) -> dict:
+    state_path = output_path / _ALERT_STATE_FILE
+    if not state_path.exists():
+        return {
+            "first_run_utc": None,
+            "last_run_utc": None,
+            "last_success_utc": None,
+            "consecutive_failures": 0,
+            "failure_alert_sent_for": 0,
+            "stale_alert_active": False,
+        }
+
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        logging.exception("Failed to read alert state file; resetting state")
+        return {
+            "first_run_utc": None,
+            "last_run_utc": None,
+            "last_success_utc": None,
+            "consecutive_failures": 0,
+            "failure_alert_sent_for": 0,
+            "stale_alert_active": False,
+        }
+
+
+def _save_alert_state(output_path: Path, state: dict) -> None:
+    output_path.mkdir(parents=True, exist_ok=True)
+    state_path = output_path / _ALERT_STATE_FILE
+    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def _emit_alert(alerts_cfg: dict, *, alert_kind: str, message: str, metadata: dict | None = None, event_type: str = "error") -> None:
+    output_path = Path(alerts_cfg.get("output_path") or "alerts")
+    try:
+        alert_file = _write_alert_file(output_path, alert_kind=alert_kind, message=message, metadata=metadata)
+        logging.error("ALERT emitted (%s): %s | file=%s", alert_kind, message, alert_file)
+    except Exception:
+        logging.exception("Failed to write alert file for %s", alert_kind)
+
+    _write_windows_event_log(f"[{alert_kind}] {message}", event_type=event_type)
+
+
+def _run_workflow_cfg(cfg: dict) -> int:
     app_cfg = cfg.get("app", {})
     export_cfg = cfg.get("export", {})
     workflow = cfg.get("workflow", [])
@@ -165,3 +273,81 @@ def run_workflow(config_path: str) -> int:
     logging.info("Workflow completed successfully: %s", output_file)
     print(f"SUCCESS: {output_file}")
     return 0
+
+
+def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
+    alerts_cfg = cfg.get("alerts", {})
+    if not alerts_cfg.get("enabled", False):
+        return
+
+    output_path = Path(alerts_cfg.get("output_path") or "alerts")
+    failure_threshold = max(int(alerts_cfg.get("failure_threshold", 3)), 1)
+    sla_hours = float(alerts_cfg.get("sla_hours", 24))
+
+    now = _utc_now()
+    now_iso = _to_iso8601(now)
+
+    state = _load_alert_state(output_path)
+    state.setdefault("consecutive_failures", 0)
+    state.setdefault("failure_alert_sent_for", 0)
+    state.setdefault("stale_alert_active", False)
+
+    if not state.get("first_run_utc"):
+        state["first_run_utc"] = now_iso
+    state["last_run_utc"] = now_iso
+
+    if run_status == 0:
+        state["last_success_utc"] = now_iso
+        state["consecutive_failures"] = 0
+        state["failure_alert_sent_for"] = 0
+        state["stale_alert_active"] = False
+    else:
+        state["consecutive_failures"] = int(state.get("consecutive_failures", 0)) + 1
+        consecutive_failures = int(state["consecutive_failures"])
+        already_sent_for = int(state.get("failure_alert_sent_for", 0))
+        if consecutive_failures >= failure_threshold and already_sent_for < failure_threshold:
+            _emit_alert(
+                alerts_cfg,
+                alert_kind="failure_threshold",
+                message=(
+                    f"Workflow has failed {consecutive_failures} consecutive run(s), "
+                    f"meeting configured threshold ({failure_threshold})."
+                ),
+                metadata={
+                    "consecutive_failures": consecutive_failures,
+                    "failure_threshold": failure_threshold,
+                },
+            )
+            state["failure_alert_sent_for"] = failure_threshold
+
+    if sla_hours > 0:
+        reference_dt = _from_iso8601(state.get("last_success_utc")) or _from_iso8601(state.get("first_run_utc"))
+        stale_active = bool(state.get("stale_alert_active", False))
+        if reference_dt:
+            deadline = reference_dt + timedelta(hours=sla_hours)
+            if now >= deadline and not stale_active:
+                _emit_alert(
+                    alerts_cfg,
+                    alert_kind="stale_data",
+                    message=(
+                        "No successful run observed within SLA window "
+                        f"({sla_hours:g} hours)."
+                    ),
+                    metadata={
+                        "sla_hours": sla_hours,
+                        "reference_time_utc": _to_iso8601(reference_dt),
+                        "deadline_utc": _to_iso8601(deadline),
+                        "last_success_utc": state.get("last_success_utc"),
+                    },
+                    event_type="warning",
+                )
+                state["stale_alert_active"] = True
+
+    _save_alert_state(output_path, state)
+
+
+def run_workflow(config_path: str) -> int:
+    cfg = load_json(config_path)
+    status = _run_workflow_cfg(cfg)
+    _handle_alerts_for_run(cfg, status)
+    return status

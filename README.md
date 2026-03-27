@@ -103,6 +103,12 @@ The runner expects JSON shaped like:
   "export": {
     "output_dir": "exports"
   },
+  "alerts": {
+    "enabled": true,
+    "failure_threshold": 3,
+    "sla_hours": 24,
+    "output_path": "alerts"
+  },
   "workflow": [
     {
       "name": "focus_export_button",
@@ -134,6 +140,21 @@ The runner expects JSON shaped like:
   ]
 }
 ```
+
+
+### Alerting configuration
+
+When `alerts.enabled` is `true`, each scheduler/run invocation updates internal alert state and can emit machine-consumable alert files into `alerts.output_path`:
+
+- `alerts.enabled`: turn alerting on/off.
+- `alerts.failure_threshold`: emit a `failure_threshold` alert after this many consecutive failed runs.
+- `alerts.sla_hours`: emit a `stale_data` alert if no successful run is observed within this many hours.
+- `alerts.output_path`: watched folder where alert JSON files (and internal state file) are written.
+
+Alert behaviors:
+- A failure-threshold alert is emitted once per failure streak (resets after a successful run).
+- A stale-data alert is emitted when the SLA window is breached and is cleared by the next successful run.
+- On Windows hosts with `pywin32` Event Log support available, matching Windows Event Log entries are also written.
 
 ### Notes
 - The runner generates timestamped CSV paths under `export.output_dir`.
@@ -168,6 +189,40 @@ Trainer/runner actions currently supported:
 5. Save config JSON (for example `configs/vendor_export.json`).
 6. Run the workflow with `python -m src run --config ...`.
 7. Verify the CSV file was created and is non-empty.
+
+---
+
+
+## Operator response playbook
+
+Use the following runbook whenever an alert is written to the watched alert folder or appears in Windows Event Log.
+
+1. **Acknowledge the alert**
+   - Record alert type, timestamp, host, and current consecutive-failure count (if present).
+
+2. **Collect evidence**
+   - Save the runner console/log output for the failing schedule window.
+   - Confirm whether the vendor application is open, responsive, and in the expected desktop session.
+   - Verify output destination (`export.output_dir`) is writable and has free disk space.
+
+3. **Failure-threshold alert response (`failure_threshold`)**
+   - Re-run once manually: `python -m src run --config <config.json>`.
+   - If manual run fails, re-open trainer and validate selectors for changed controls (`name`, `class_name`, `automation_id`).
+   - If selectors are unchanged, escalate to application support/vendor team with the failed step and exception details.
+
+4. **Stale-data alert response (`stale_data`)**
+   - Confirm scheduler is still active and invoking the runner on expected cadence.
+   - Validate most recent successful export timestamp against downstream SLA requirements.
+   - Trigger an immediate manual run and verify a new non-empty export is produced.
+
+5. **Recovery verification**
+   - Ensure one successful run completes end-to-end; this clears failure streak and stale alert state.
+   - Confirm downstream systems receive the new export file.
+
+6. **Post-incident hardening**
+   - Update selectors/workflow retries if UI timing changed.
+   - Adjust `alerts.failure_threshold` / `alerts.sla_hours` only if operational requirements changed.
+   - Document root cause and prevention action in your operations log.
 
 ---
 
