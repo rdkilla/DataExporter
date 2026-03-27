@@ -1,6 +1,7 @@
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 from pywinauto import Application, Desktop
 
@@ -35,7 +36,7 @@ def _find_control(window, control_cfg: dict):
     )
 
 
-def run_workflow(config_path: str) -> int:
+def run_workflow_with_metadata(config_path: str) -> dict[str, Any]:
     cfg = load_json(config_path)
     app_cfg = cfg.get("app", {})
     export_cfg = cfg.get("export", {})
@@ -43,7 +44,7 @@ def run_workflow(config_path: str) -> int:
 
     if not workflow:
         logging.error("No workflow steps found in config.")
-        return 1
+        return {"exit_code": 1, "success": False, "output_file": None}
 
     output_file = make_output_file(export_cfg.get("output_dir", "exports"))
 
@@ -52,7 +53,7 @@ def run_workflow(config_path: str) -> int:
         window.wait("visible", timeout=30)
     except Exception as exc:
         logging.exception("Failed to connect to target window: %s", exc)
-        return 1
+        return {"exit_code": 1, "success": False, "output_file": output_file}
 
     for step in workflow:
         step_name = step.get("name", "<unnamed>")
@@ -80,18 +81,22 @@ def run_workflow(config_path: str) -> int:
                 logging.warning("Step failed: %s | attempt=%s | error=%s", step_name, attempt, exc)
                 if attempt > retries:
                     logging.exception("Workflow failed on step: %s", step_name)
-                    return 1
+                    return {"exit_code": 1, "success": False, "output_file": output_file}
                 time.sleep(1)
 
     path = Path(output_file)
     if not path.exists():
         logging.error("Expected export file does not exist: %s", output_file)
-        return 1
+        return {"exit_code": 1, "success": False, "output_file": output_file}
 
     if path.stat().st_size <= 0:
         logging.error("Export file is empty: %s", output_file)
-        return 1
+        return {"exit_code": 1, "success": False, "output_file": output_file}
 
     logging.info("Workflow completed successfully: %s", output_file)
     print(f"SUCCESS: {output_file}")
-    return 0
+    return {"exit_code": 0, "success": True, "output_file": output_file}
+
+
+def run_workflow(config_path: str) -> int:
+    return int(run_workflow_with_metadata(config_path)["exit_code"])
