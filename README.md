@@ -69,13 +69,17 @@ Execute a saved workflow JSON.
 python -m src run --config configs/vendor_export.json
 ```
 
-Validate that workflow controls are resolvable without mutating the UI:
+### 3) Daemon mode
+
+Run continuously using `export.schedule` and persist run metadata to a local state file.
 
 ```bash
-python -m src run --config configs/vendor_export.json --dry-run
+python -m src daemon --config configs/vendor_export.json --state-file state/run_history.json
 ```
 
-### 3) Package mode
+On startup, daemon mode inspects `state/run_history.json`, detects missed scheduling windows, and performs capped catch-up runs based on `export.max_missed_runs_to_catch_up`.
+
+### 4) Package mode
 
 Build a distributable executable with PyInstaller.
 
@@ -107,7 +111,11 @@ The runner expects JSON shaped like:
     "exe_path": "C:/Path/To/VendorApp.exe"
   },
   "export": {
-    "output_dir": "exports"
+    "output_dir": "exports",
+    "schedule": "every 6 hours",
+    "timezone": "America/Chicago",
+    "max_missed_runs_to_catch_up": 3,
+    "quiet_hours": { "start": "22:00", "end": "06:00" }
   },
   "alerts": {
     "enabled": true,
@@ -166,6 +174,11 @@ Alert behaviors:
 - The runner generates timestamped CSV paths under `export.output_dir`.
 - If a step `value` is `"{output_file}"`, it is replaced with the generated path.
 - Each step retries according to its `retries` field.
+- `export.schedule` accepts either a 5-field cron expression (for example `0 */6 * * *`) or intervals such as `every 6 hours`, `30m`, or `1d`.
+- `export.timezone` uses IANA names (for example `America/Chicago`).
+- `export.max_missed_runs_to_catch_up` caps backlog execution on daemon startup.
+- Optional `export.quiet_hours` (string `HH:MM-HH:MM` or object with `start`/`end`) defers executions during quiet windows.
+- Daemon run history is stored at `state/run_history.json` by default with each run's planned time, execution timestamps, success/failure, catch-up marker, and output file path.
 
 ---
 
@@ -238,6 +251,24 @@ Use the following runbook whenever an alert is written to the watched alert fold
 - **Control lookup fails**: re-train using more stable selectors (`name`, `class_name`, `automation_id`).
 - **Workflow succeeds but no file appears**: verify export dialog behavior and that a step writes `"{output_file}"` to the correct field.
 - **Packaging works but EXE fails on target machine**: rebuild on a machine matching target OS and architecture.
+
+## Run manifests
+
+Each `run` attempt now writes a JSON manifest to `logs/manifests/` with a unique, append-only filename per run:
+
+- `logs/manifests/YYYY-MM-DD_HHMMSS_microseconds_run.json`
+
+Manifest records include:
+- UTC run start/end timestamps.
+- Config path and config SHA-256 checksum.
+- App backend and window matcher details used.
+- Per-step status (pass/fail), retry/attempt counts, and step duration.
+- Export output path, file size, and file SHA-256 checksum when export succeeds.
+- Overall result and any captured error details.
+
+### Retention policy
+
+Manifest files are intentionally append-only to preserve audit history. Keep at least **90 days** of manifest files for operational traceability. Older files can be archived or deleted according to your site policy/capacity constraints.
 
 ---
 

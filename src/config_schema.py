@@ -7,6 +7,10 @@ def make_base_config(backend: str, window_title_regex: str, exe_path: str | None
         },
         "export": {
             "output_dir": output_dir,
+            "schedule": "every 6 hours",
+            "timezone": "UTC",
+            "max_missed_runs_to_catch_up": 3,
+            "quiet_hours": None,
         },
         "workflow": [],
         "alerts": {
