@@ -1,5 +1,7 @@
 import json
 import logging
+import hashlib
+import json
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,6 +14,36 @@ from src.utils import make_output_file
 
 _ALERT_STATE_FILE = ".data_exporter_alert_state.json"
 _EVENT_LOG_SOURCE = "DataExporter"
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(8192), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_manifest(start_ts: str, manifest: dict) -> None:
+    date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    run_suffix = datetime.now(timezone.utc).strftime("%H%M%S_%f")
+    manifest_dir = Path("logs") / "manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = manifest_dir / f"{date_prefix}_{run_suffix}_run.json"
+    with manifest_path.open("w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "timestamp_start_utc": start_ts,
+                **manifest,
+            },
+            fh,
+            indent=2,
+        )
+    logging.info("Wrote run manifest: %s", manifest_path)
 
 
 def _connect_window(app_cfg: dict):
@@ -215,18 +247,30 @@ def _run_workflow_cfg(cfg: dict) -> int:
     app_cfg = cfg.get("app", {})
     export_cfg = cfg.get("export", {})
     workflow = cfg.get("workflow", [])
+    manifest["app"]["backend"] = app_cfg.get("backend", "win32")
+    manifest["app"]["window_matcher"] = {
+        "title_regex": app_cfg.get("window_title_regex", ".*"),
+        "exe_path": app_cfg.get("exe_path"),
+    }
 
     if not workflow:
         logging.error("No workflow steps found in config.")
+        manifest["error"] = "No workflow steps found in config."
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
         return 1
 
     output_file = make_output_file(export_cfg.get("output_dir", "exports"))
+    manifest["export"]["path"] = output_file
 
     try:
         window = _connect_window(app_cfg)
         window.wait("visible", timeout=30)
     except Exception as exc:
         logging.exception("Failed to connect to target window: %s", exc)
+        manifest["error"] = f"Failed to connect to target window: {exc}"
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
         return 1
 
     for step in workflow:
@@ -242,6 +286,8 @@ def _run_workflow_cfg(cfg: dict) -> int:
             value = output_file
 
         attempt = 0
+        step_started = time.perf_counter()
+        last_error = None
         while True:
             try:
                 step_window = _resolve_step_window(window, app_cfg, step_window_cfg)
@@ -252,23 +298,61 @@ def _run_workflow_cfg(cfg: dict) -> int:
                 if delay_after > 0:
                     time.sleep(delay_after)
                 logging.info("Step succeeded: %s | %s", step_name, result)
+                manifest["workflow_steps"].append(
+                    {
+                        "name": step_name,
+                        "action": action,
+                        "passed": True,
+                        "attempts": attempt + 1,
+                        "retries_configured": retries,
+                        "duration_seconds": round(time.perf_counter() - step_started, 3),
+                        "error": None,
+                    }
+                )
                 break
             except Exception as exc:
                 attempt += 1
+                last_error = str(exc)
                 logging.warning("Step failed: %s | attempt=%s | error=%s", step_name, attempt, exc)
                 if attempt > retries:
                     logging.exception("Workflow failed on step: %s", step_name)
+                    manifest["workflow_steps"].append(
+                        {
+                            "name": step_name,
+                            "action": action,
+                            "passed": False,
+                            "attempts": attempt,
+                            "retries_configured": retries,
+                            "duration_seconds": round(time.perf_counter() - step_started, 3),
+                            "error": last_error,
+                        }
+                    )
+                    manifest["error"] = f"Workflow failed on step '{step_name}': {last_error}"
+                    manifest["timestamp_end_utc"] = _utc_now_iso()
+                    _write_manifest(started_at_utc, manifest)
                     return 1
                 time.sleep(1)
 
     path = Path(output_file)
     if not path.exists():
         logging.error("Expected export file does not exist: %s", output_file)
+        manifest["error"] = f"Expected export file does not exist: {output_file}"
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
         return 1
 
     if path.stat().st_size <= 0:
         logging.error("Export file is empty: %s", output_file)
+        manifest["error"] = f"Export file is empty: {output_file}"
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
         return 1
+
+    manifest["export"]["size_bytes"] = path.stat().st_size
+    manifest["export"]["checksum_sha256"] = _file_sha256(path)
+    manifest["overall_result"] = "success"
+    manifest["timestamp_end_utc"] = _utc_now_iso()
+    _write_manifest(started_at_utc, manifest)
 
     logging.info("Workflow completed successfully: %s", output_file)
     print(f"SUCCESS: {output_file}")
