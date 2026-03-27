@@ -1,9 +1,6 @@
 import argparse
 
-from src.builder import build_executable
 from src.logging_setup import setup_logging
-from src.runner import run_workflow
-from src.trainer import run_trainer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,6 +16,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     run_parser = subparsers.add_parser("run", help="Run saved workflow")
+    run_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to workflow config JSON",
+    )
+
+    check_parser = subparsers.add_parser("check", help="Validate workflow config")
+    check_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to workflow config JSON",
+    )
+    check_parser.add_argument(
+        "--resolve-selectors",
+        action="store_true",
+        help="Try to resolve window/control selectors without performing actions",
+    )
 
     package_parser = subparsers.add_parser("package", help="Build a standalone executable with PyInstaller")
     package_parser.add_argument(
@@ -58,12 +72,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extra raw argument passed to PyInstaller (can be repeated)",
     )
 
-    run_parser.add_argument(
-        "--config",
-        required=True,
-        help="Path to workflow config JSON",
-    )
-
     return parser
 
 
@@ -72,12 +80,23 @@ def main() -> int:
     args = build_parser().parse_args()
 
     if args.command == "trainer":
+        from src.trainer import run_trainer
+
         return run_trainer(backend=args.backend)
 
     if args.command == "run":
+        from src.runner import run_workflow
+
         return run_workflow(args.config)
 
+    if args.command == "check":
+        from src.runner import check_workflow
+
+        return check_workflow(args.config, resolve_selectors=args.resolve_selectors)
+
     if args.command == "package":
+        from src.builder import build_executable
+
         return build_executable(
             executable_name=args.name,
             one_file=not args.onedir,
