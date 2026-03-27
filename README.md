@@ -69,6 +69,12 @@ Execute a saved workflow JSON.
 python -m src run --config configs/vendor_export.json
 ```
 
+Validate that workflow controls are resolvable without mutating the UI:
+
+```bash
+python -m src run --config configs/vendor_export.json --dry-run
+```
+
 ### 3) Package mode
 
 Build a distributable executable with PyInstaller.

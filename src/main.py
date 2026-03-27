@@ -63,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Path to workflow config JSON",
     )
+    run_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate workflow control resolution without performing UI actions",
+    )
 
     return parser
 
@@ -75,7 +80,7 @@ def main() -> int:
         return run_trainer(backend=args.backend)
 
     if args.command == "run":
-        return run_workflow(args.config)
+        return run_workflow(args.config, dry_run=args.dry_run)
 
     if args.command == "package":
         return build_executable(
