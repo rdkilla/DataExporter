@@ -13,6 +13,12 @@ def make_base_config(backend: str, window_title_regex: str, exe_path: str | None
             "quiet_hours": None,
         },
         "workflow": [],
+        "alerts": {
+            "enabled": False,
+            "failure_threshold": 3,
+            "sla_hours": 24,
+            "output_path": "alerts",
+        },
     }
 
 

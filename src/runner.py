@@ -1,5 +1,9 @@
+import json
 import logging
+import hashlib
+import json
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +12,39 @@ from pywinauto import Application, Desktop
 from src.actions import perform_action
 from src.config_io import load_json
 from src.utils import make_output_file
+
+_ALERT_STATE_FILE = ".data_exporter_alert_state.json"
+_EVENT_LOG_SOURCE = "DataExporter"
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(8192), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_manifest(start_ts: str, manifest: dict) -> None:
+    date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    run_suffix = datetime.now(timezone.utc).strftime("%H%M%S_%f")
+    manifest_dir = Path("logs") / "manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = manifest_dir / f"{date_prefix}_{run_suffix}_run.json"
+    with manifest_path.open("w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "timestamp_start_utc": start_ts,
+                **manifest,
+            },
+            fh,
+            indent=2,
+        )
+    logging.info("Wrote run manifest: %s", manifest_path)
 
 
 def _connect_window(app_cfg: dict):
@@ -27,33 +64,215 @@ def _connect_window(app_cfg: dict):
     return desktop.window(title_re=title_re)
 
 
-def _find_control(window, control_cfg: dict):
-    return window.child_window(
-        title=control_cfg.get("name") or None,
-        control_type=control_cfg.get("control_type") or None,
-        class_name=control_cfg.get("class_name") or None,
-        auto_id=control_cfg.get("automation_id") or None,
-    )
+def _find_control(window, control_cfg: dict, backend: str = "win32"):
+    def _try_child_window(strategy: str, criteria: dict):
+        control = window.child_window(**criteria)
+        if control.exists(timeout=1):
+            logging.info("Control selector matched using strategy=%s | criteria=%s", strategy, criteria)
+            return control
+        return None
+
+    criteria = {
+        "title": control_cfg.get("name") or control_cfg.get("title") or None,
+        "control_type": control_cfg.get("control_type") or None,
+        "class_name": control_cfg.get("class_name") or None,
+        "auto_id": control_cfg.get("automation_id") or None,
+    }
+
+    exact_criteria = {k: v for k, v in criteria.items() if v is not None}
+    if exact_criteria:
+        control = _try_child_window("exact_attributes", exact_criteria)
+        if control is not None:
+            return control
+
+    title_regex = control_cfg.get("title_regex") or control_cfg.get("title_re")
+    if title_regex:
+        regex_criteria = {
+            "title_re": title_regex,
+            "control_type": criteria.get("control_type"),
+            "class_name": criteria.get("class_name"),
+            "auto_id": criteria.get("auto_id"),
+        }
+        regex_criteria = {k: v for k, v in regex_criteria.items() if v is not None}
+        control = _try_child_window("regex_title", regex_criteria)
+        if control is not None:
+            return control
+
+    found_index = control_cfg.get("found_index")
+    if found_index is not None:
+        index_criteria = {"found_index": int(found_index)}
+        for key in ("control_type", "class_name", "auto_id"):
+            value = criteria.get(key)
+            if value is not None:
+                index_criteria[key] = value
+        control = _try_child_window("found_index", index_criteria)
+        if control is not None:
+            return control
+
+    coordinate_fallback = control_cfg.get("coordinates") or control_cfg.get("click_point")
+    if coordinate_fallback and "x" in coordinate_fallback and "y" in coordinate_fallback:
+        x = int(coordinate_fallback["x"])
+        y = int(coordinate_fallback["y"])
+        control = Desktop(backend=backend).from_point(x, y)
+        logging.info("Control selector matched using strategy=coordinates | x=%s | y=%s", x, y)
+        return control
+
+    raise ValueError(f"No supported selector strategy found for control config: {control_cfg}")
 
 
-def run_workflow_with_metadata(config_path: str) -> dict[str, Any]:
-    cfg = load_json(config_path)
+def _resolve_step_window(default_window, app_cfg: dict, step_window_cfg: dict | None):
+    if not step_window_cfg:
+        return default_window
+
+    backend = app_cfg.get("backend", "win32")
+    matcher = {
+        "title": step_window_cfg.get("title") or None,
+        "title_re": step_window_cfg.get("title_regex") or step_window_cfg.get("title_re") or None,
+        "class_name": step_window_cfg.get("class_name") or None,
+        "handle": step_window_cfg.get("handle") or None,
+    }
+    matcher = {k: v for k, v in matcher.items() if v is not None}
+    if not matcher:
+        return default_window
+
+    step_window = Desktop(backend=backend).window(**matcher)
+    logging.info("Using step-specific window matcher: %s", matcher)
+    return step_window
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _to_iso8601(value: datetime) -> str:
+    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _from_iso8601(value: str | None) -> datetime | None:
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        logging.warning("Could not parse timestamp in alert state: %s", value)
+        return None
+
+
+def _write_windows_event_log(message: str, *, event_type: str = "error") -> None:
+    try:
+        import win32evtlog  # type: ignore
+        import win32evtlogutil  # type: ignore
+    except Exception:
+        logging.info("Windows Event Log libraries unavailable; skipping Event Log write")
+        return
+
+    event_map = {
+        "error": win32evtlog.EVENTLOG_ERROR_TYPE,
+        "warning": win32evtlog.EVENTLOG_WARNING_TYPE,
+        "info": win32evtlog.EVENTLOG_INFORMATION_TYPE,
+    }
+    safe_event_type = event_map.get(event_type, win32evtlog.EVENTLOG_ERROR_TYPE)
+
+    try:
+        win32evtlogutil.ReportEvent(
+            appName=_EVENT_LOG_SOURCE,
+            eventID=1000,
+            eventCategory=0,
+            eventType=safe_event_type,
+            strings=[message],
+            data=b"",
+        )
+    except Exception:
+        logging.exception("Failed writing Windows Event Log entry")
+
+
+def _write_alert_file(output_path: Path, *, alert_kind: str, message: str, metadata: dict | None = None) -> Path:
+    output_path.mkdir(parents=True, exist_ok=True)
+    ts = _utc_now().strftime("%Y%m%dT%H%M%SZ")
+    alert_file = output_path / f"alert_{alert_kind}_{ts}.json"
+    payload = {
+        "alert_type": alert_kind,
+        "message": message,
+        "created_utc": _to_iso8601(_utc_now()),
+        "metadata": metadata or {},
+    }
+    alert_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return alert_file
+
+
+def _load_alert_state(output_path: Path) -> dict:
+    state_path = output_path / _ALERT_STATE_FILE
+    if not state_path.exists():
+        return {
+            "first_run_utc": None,
+            "last_run_utc": None,
+            "last_success_utc": None,
+            "consecutive_failures": 0,
+            "failure_alert_sent_for": 0,
+            "stale_alert_active": False,
+        }
+
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        logging.exception("Failed to read alert state file; resetting state")
+        return {
+            "first_run_utc": None,
+            "last_run_utc": None,
+            "last_success_utc": None,
+            "consecutive_failures": 0,
+            "failure_alert_sent_for": 0,
+            "stale_alert_active": False,
+        }
+
+
+def _save_alert_state(output_path: Path, state: dict) -> None:
+    output_path.mkdir(parents=True, exist_ok=True)
+    state_path = output_path / _ALERT_STATE_FILE
+    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def _emit_alert(alerts_cfg: dict, *, alert_kind: str, message: str, metadata: dict | None = None, event_type: str = "error") -> None:
+    output_path = Path(alerts_cfg.get("output_path") or "alerts")
+    try:
+        alert_file = _write_alert_file(output_path, alert_kind=alert_kind, message=message, metadata=metadata)
+        logging.error("ALERT emitted (%s): %s | file=%s", alert_kind, message, alert_file)
+    except Exception:
+        logging.exception("Failed to write alert file for %s", alert_kind)
+
+    _write_windows_event_log(f"[{alert_kind}] {message}", event_type=event_type)
+
+
+def _run_workflow_cfg(cfg: dict) -> int:
     app_cfg = cfg.get("app", {})
     export_cfg = cfg.get("export", {})
     workflow = cfg.get("workflow", [])
+    manifest["app"]["backend"] = app_cfg.get("backend", "win32")
+    manifest["app"]["window_matcher"] = {
+        "title_regex": app_cfg.get("window_title_regex", ".*"),
+        "exe_path": app_cfg.get("exe_path"),
+    }
 
     if not workflow:
         logging.error("No workflow steps found in config.")
-        return {"exit_code": 1, "success": False, "output_file": None}
+        manifest["error"] = "No workflow steps found in config."
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
+        return 1
 
     output_file = make_output_file(export_cfg.get("output_dir", "exports"))
+    manifest["export"]["path"] = output_file
 
     try:
         window = _connect_window(app_cfg)
         window.wait("visible", timeout=30)
     except Exception as exc:
         logging.exception("Failed to connect to target window: %s", exc)
-        return {"exit_code": 1, "success": False, "output_file": output_file}
+        manifest["error"] = f"Failed to connect to target window: {exc}"
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
+        return 1
 
     for step in workflow:
         step_name = step.get("name", "<unnamed>")
@@ -61,42 +280,159 @@ def run_workflow_with_metadata(config_path: str) -> dict[str, Any]:
         delay_after = float(step.get("delay_after", 0))
         action = step["action"]
         control_cfg = step["control"]
+        step_window_cfg = step.get("window")
         value = step.get("value")
 
         if value == "{output_file}":
             value = output_file
 
         attempt = 0
+        step_started = time.perf_counter()
+        last_error = None
         while True:
             try:
-                control = _find_control(window, control_cfg)
+                step_window = _resolve_step_window(window, app_cfg, step_window_cfg)
+                step_window.wait("visible", timeout=10)
+                control = _find_control(step_window, control_cfg, backend=app_cfg.get("backend", "win32"))
                 control.wait("exists enabled visible ready", timeout=10)
                 result = perform_action(control, action, value)
                 if delay_after > 0:
                     time.sleep(delay_after)
                 logging.info("Step succeeded: %s | %s", step_name, result)
+                manifest["workflow_steps"].append(
+                    {
+                        "name": step_name,
+                        "action": action,
+                        "passed": True,
+                        "attempts": attempt + 1,
+                        "retries_configured": retries,
+                        "duration_seconds": round(time.perf_counter() - step_started, 3),
+                        "error": None,
+                    }
+                )
                 break
             except Exception as exc:
                 attempt += 1
+                last_error = str(exc)
                 logging.warning("Step failed: %s | attempt=%s | error=%s", step_name, attempt, exc)
                 if attempt > retries:
                     logging.exception("Workflow failed on step: %s", step_name)
-                    return {"exit_code": 1, "success": False, "output_file": output_file}
+                    manifest["workflow_steps"].append(
+                        {
+                            "name": step_name,
+                            "action": action,
+                            "passed": False,
+                            "attempts": attempt,
+                            "retries_configured": retries,
+                            "duration_seconds": round(time.perf_counter() - step_started, 3),
+                            "error": last_error,
+                        }
+                    )
+                    manifest["error"] = f"Workflow failed on step '{step_name}': {last_error}"
+                    manifest["timestamp_end_utc"] = _utc_now_iso()
+                    _write_manifest(started_at_utc, manifest)
+                    return 1
                 time.sleep(1)
 
     path = Path(output_file)
     if not path.exists():
         logging.error("Expected export file does not exist: %s", output_file)
-        return {"exit_code": 1, "success": False, "output_file": output_file}
+        manifest["error"] = f"Expected export file does not exist: {output_file}"
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
+        return 1
 
     if path.stat().st_size <= 0:
         logging.error("Export file is empty: %s", output_file)
-        return {"exit_code": 1, "success": False, "output_file": output_file}
+        manifest["error"] = f"Export file is empty: {output_file}"
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
+        return 1
+
+    manifest["export"]["size_bytes"] = path.stat().st_size
+    manifest["export"]["checksum_sha256"] = _file_sha256(path)
+    manifest["overall_result"] = "success"
+    manifest["timestamp_end_utc"] = _utc_now_iso()
+    _write_manifest(started_at_utc, manifest)
 
     logging.info("Workflow completed successfully: %s", output_file)
     print(f"SUCCESS: {output_file}")
-    return {"exit_code": 0, "success": True, "output_file": output_file}
+    return 0
+
+
+def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
+    alerts_cfg = cfg.get("alerts", {})
+    if not alerts_cfg.get("enabled", False):
+        return
+
+    output_path = Path(alerts_cfg.get("output_path") or "alerts")
+    failure_threshold = max(int(alerts_cfg.get("failure_threshold", 3)), 1)
+    sla_hours = float(alerts_cfg.get("sla_hours", 24))
+
+    now = _utc_now()
+    now_iso = _to_iso8601(now)
+
+    state = _load_alert_state(output_path)
+    state.setdefault("consecutive_failures", 0)
+    state.setdefault("failure_alert_sent_for", 0)
+    state.setdefault("stale_alert_active", False)
+
+    if not state.get("first_run_utc"):
+        state["first_run_utc"] = now_iso
+    state["last_run_utc"] = now_iso
+
+    if run_status == 0:
+        state["last_success_utc"] = now_iso
+        state["consecutive_failures"] = 0
+        state["failure_alert_sent_for"] = 0
+        state["stale_alert_active"] = False
+    else:
+        state["consecutive_failures"] = int(state.get("consecutive_failures", 0)) + 1
+        consecutive_failures = int(state["consecutive_failures"])
+        already_sent_for = int(state.get("failure_alert_sent_for", 0))
+        if consecutive_failures >= failure_threshold and already_sent_for < failure_threshold:
+            _emit_alert(
+                alerts_cfg,
+                alert_kind="failure_threshold",
+                message=(
+                    f"Workflow has failed {consecutive_failures} consecutive run(s), "
+                    f"meeting configured threshold ({failure_threshold})."
+                ),
+                metadata={
+                    "consecutive_failures": consecutive_failures,
+                    "failure_threshold": failure_threshold,
+                },
+            )
+            state["failure_alert_sent_for"] = failure_threshold
+
+    if sla_hours > 0:
+        reference_dt = _from_iso8601(state.get("last_success_utc")) or _from_iso8601(state.get("first_run_utc"))
+        stale_active = bool(state.get("stale_alert_active", False))
+        if reference_dt:
+            deadline = reference_dt + timedelta(hours=sla_hours)
+            if now >= deadline and not stale_active:
+                _emit_alert(
+                    alerts_cfg,
+                    alert_kind="stale_data",
+                    message=(
+                        "No successful run observed within SLA window "
+                        f"({sla_hours:g} hours)."
+                    ),
+                    metadata={
+                        "sla_hours": sla_hours,
+                        "reference_time_utc": _to_iso8601(reference_dt),
+                        "deadline_utc": _to_iso8601(deadline),
+                        "last_success_utc": state.get("last_success_utc"),
+                    },
+                    event_type="warning",
+                )
+                state["stale_alert_active"] = True
+
+    _save_alert_state(output_path, state)
 
 
 def run_workflow(config_path: str) -> int:
-    return int(run_workflow_with_metadata(config_path)["exit_code"])
+    cfg = load_json(config_path)
+    status = _run_workflow_cfg(cfg)
+    _handle_alerts_for_run(cfg, status)
+    return status

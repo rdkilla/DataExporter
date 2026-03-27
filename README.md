@@ -117,6 +117,12 @@ The runner expects JSON shaped like:
     "max_missed_runs_to_catch_up": 3,
     "quiet_hours": { "start": "22:00", "end": "06:00" }
   },
+  "alerts": {
+    "enabled": true,
+    "failure_threshold": 3,
+    "sla_hours": 24,
+    "output_path": "alerts"
+  },
   "workflow": [
     {
       "name": "focus_export_button",
@@ -148,6 +154,21 @@ The runner expects JSON shaped like:
   ]
 }
 ```
+
+
+### Alerting configuration
+
+When `alerts.enabled` is `true`, each scheduler/run invocation updates internal alert state and can emit machine-consumable alert files into `alerts.output_path`:
+
+- `alerts.enabled`: turn alerting on/off.
+- `alerts.failure_threshold`: emit a `failure_threshold` alert after this many consecutive failed runs.
+- `alerts.sla_hours`: emit a `stale_data` alert if no successful run is observed within this many hours.
+- `alerts.output_path`: watched folder where alert JSON files (and internal state file) are written.
+
+Alert behaviors:
+- A failure-threshold alert is emitted once per failure streak (resets after a successful run).
+- A stale-data alert is emitted when the SLA window is breached and is cleared by the next successful run.
+- On Windows hosts with `pywin32` Event Log support available, matching Windows Event Log entries are also written.
 
 ### Notes
 - The runner generates timestamped CSV paths under `export.output_dir`.
@@ -190,12 +211,64 @@ Trainer/runner actions currently supported:
 
 ---
 
+
+## Operator response playbook
+
+Use the following runbook whenever an alert is written to the watched alert folder or appears in Windows Event Log.
+
+1. **Acknowledge the alert**
+   - Record alert type, timestamp, host, and current consecutive-failure count (if present).
+
+2. **Collect evidence**
+   - Save the runner console/log output for the failing schedule window.
+   - Confirm whether the vendor application is open, responsive, and in the expected desktop session.
+   - Verify output destination (`export.output_dir`) is writable and has free disk space.
+
+3. **Failure-threshold alert response (`failure_threshold`)**
+   - Re-run once manually: `python -m src run --config <config.json>`.
+   - If manual run fails, re-open trainer and validate selectors for changed controls (`name`, `class_name`, `automation_id`).
+   - If selectors are unchanged, escalate to application support/vendor team with the failed step and exception details.
+
+4. **Stale-data alert response (`stale_data`)**
+   - Confirm scheduler is still active and invoking the runner on expected cadence.
+   - Validate most recent successful export timestamp against downstream SLA requirements.
+   - Trigger an immediate manual run and verify a new non-empty export is produced.
+
+5. **Recovery verification**
+   - Ensure one successful run completes end-to-end; this clears failure streak and stale alert state.
+   - Confirm downstream systems receive the new export file.
+
+6. **Post-incident hardening**
+   - Update selectors/workflow retries if UI timing changed.
+   - Adjust `alerts.failure_threshold` / `alerts.sla_hours` only if operational requirements changed.
+   - Document root cause and prevention action in your operations log.
+
+---
+
 ## Troubleshooting
 
 - **No windows found**: ensure the target app is open and visible in the same session.
 - **Control lookup fails**: re-train using more stable selectors (`name`, `class_name`, `automation_id`).
 - **Workflow succeeds but no file appears**: verify export dialog behavior and that a step writes `"{output_file}"` to the correct field.
 - **Packaging works but EXE fails on target machine**: rebuild on a machine matching target OS and architecture.
+
+## Run manifests
+
+Each `run` attempt now writes a JSON manifest to `logs/manifests/` with a unique, append-only filename per run:
+
+- `logs/manifests/YYYY-MM-DD_HHMMSS_microseconds_run.json`
+
+Manifest records include:
+- UTC run start/end timestamps.
+- Config path and config SHA-256 checksum.
+- App backend and window matcher details used.
+- Per-step status (pass/fail), retry/attempt counts, and step duration.
+- Export output path, file size, and file SHA-256 checksum when export succeeds.
+- Overall result and any captured error details.
+
+### Retention policy
+
+Manifest files are intentionally append-only to preserve audit history. Keep at least **90 days** of manifest files for operational traceability. Older files can be archived or deleted according to your site policy/capacity constraints.
 
 ---
 

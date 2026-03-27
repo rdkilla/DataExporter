@@ -14,5 +14,11 @@
       "end": "06:00"
     }
   },
-  "workflow": []
+  "workflow": [],
+  "alerts": {
+    "enabled": false,
+    "failure_threshold": 3,
+    "sla_hours": 24,
+    "output_path": "alerts"
+  }
 }
