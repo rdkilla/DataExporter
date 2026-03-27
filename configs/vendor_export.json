@@ -5,7 +5,10 @@
     "exe_path": "C:\\Program Files\\Vendor\\App.exe"
   },
   "export": {
-    "output_dir": "C:\\solvent_exports"
+    "output_dir": "C:\\solvent_exports",
+    "prefix": "valves",
+    "include_timestamp_utc": true,
+    "include_run_id": true
   },
   "workflow": []
 }

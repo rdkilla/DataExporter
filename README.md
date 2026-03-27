@@ -101,7 +101,10 @@ The runner expects JSON shaped like:
     "exe_path": "C:/Path/To/VendorApp.exe"
   },
   "export": {
-    "output_dir": "exports"
+    "output_dir": "exports",
+    "prefix": "valves",
+    "include_timestamp_utc": true,
+    "include_run_id": true
   },
   "workflow": [
     {
@@ -136,7 +139,11 @@ The runner expects JSON shaped like:
 ```
 
 ### Notes
-- The runner generates timestamped CSV paths under `export.output_dir`.
+- The runner generates CSV paths under `export.output_dir` using an optional naming template.
+  - `prefix` sets the filename prefix (for site/unit/vendor ID).
+  - `include_timestamp_utc` adds `YYYY-MM-DD_HHMMSS` in UTC.
+  - `include_run_id` adds a short unique suffix to reduce collisions.
+- Example output: `valves_2026-03-27_153045_a1b2c3d4.csv`.
 - If a step `value` is `"{output_file}"`, it is replaced with the generated path.
 - Each step retries according to its `retries` field.
 

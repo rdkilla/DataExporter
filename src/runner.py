@@ -45,7 +45,18 @@ def run_workflow(config_path: str) -> int:
         logging.error("No workflow steps found in config.")
         return 1
 
-    output_file = make_output_file(export_cfg.get("output_dir", "exports"))
+    output_file = make_output_file(
+        output_dir=export_cfg.get("output_dir", "exports"),
+        prefix=export_cfg.get("prefix", "valves"),
+        include_timestamp_utc=bool(export_cfg.get("include_timestamp_utc", True)),
+        include_run_id=bool(export_cfg.get("include_run_id", True)),
+    )
+
+    logging.info("Resolved output path: %s", output_file)
+    output_path = Path(output_file)
+    if output_path.exists():
+        logging.error("Output file collision detected, refusing to overwrite: %s", output_file)
+        return 1
 
     try:
         window = _connect_window(app_cfg)
@@ -83,12 +94,11 @@ def run_workflow(config_path: str) -> int:
                     return 1
                 time.sleep(1)
 
-    path = Path(output_file)
-    if not path.exists():
+    if not output_path.exists():
         logging.error("Expected export file does not exist: %s", output_file)
         return 1
 
-    if path.stat().st_size <= 0:
+    if output_path.stat().st_size <= 0:
         logging.error("Export file is empty: %s", output_file)
         return 1
 

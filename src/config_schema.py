@@ -7,6 +7,9 @@ def make_base_config(backend: str, window_title_regex: str, exe_path: str | None
         },
         "export": {
             "output_dir": output_dir,
+            "prefix": "valves",
+            "include_timestamp_utc": True,
+            "include_run_id": True,
         },
         "workflow": [],
     }
