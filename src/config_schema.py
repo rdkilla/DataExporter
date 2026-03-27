@@ -7,11 +7,18 @@ def make_base_config(backend: str, window_title_regex: str, exe_path: str | None
         },
         "export": {
             "output_dir": output_dir,
-            "prefix": "valves",
-            "include_timestamp_utc": True,
-            "include_run_id": True,
+            "schedule": "every 6 hours",
+            "timezone": "UTC",
+            "max_missed_runs_to_catch_up": 3,
+            "quiet_hours": None,
         },
         "workflow": [],
+        "alerts": {
+            "enabled": False,
+            "failure_threshold": 3,
+            "sla_hours": 24,
+            "output_path": "alerts",
+        },
     }
 
 

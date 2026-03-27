@@ -6,9 +6,19 @@
   },
   "export": {
     "output_dir": "C:\\solvent_exports",
-    "prefix": "valves",
-    "include_timestamp_utc": true,
-    "include_run_id": true
+    "schedule": "every 6 hours",
+    "timezone": "America/Chicago",
+    "max_missed_runs_to_catch_up": 3,
+    "quiet_hours": {
+      "start": "22:00",
+      "end": "06:00"
+    }
   },
-  "workflow": []
+  "workflow": [],
+  "alerts": {
+    "enabled": false,
+    "failure_threshold": 3,
+    "sla_hours": 24,
+    "output_path": "alerts"
+  }
 }
