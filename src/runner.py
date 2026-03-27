@@ -1,8 +1,11 @@
 import json
 import logging
+import hashlib
+import json
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from src.actions import perform_action
 from src.config_io import load_json
@@ -13,9 +16,37 @@ _ALERT_STATE_FILE = ".data_exporter_alert_state.json"
 _EVENT_LOG_SOURCE = "DataExporter"
 
 
-def _connect_window(app_cfg: dict, launch_if_needed: bool = True):
-    from pywinauto import Application, Desktop
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(8192), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_manifest(start_ts: str, manifest: dict) -> None:
+    date_prefix = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    run_suffix = datetime.now(timezone.utc).strftime("%H%M%S_%f")
+    manifest_dir = Path("logs") / "manifests"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = manifest_dir / f"{date_prefix}_{run_suffix}_run.json"
+    with manifest_path.open("w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "timestamp_start_utc": start_ts,
+                **manifest,
+            },
+            fh,
+            indent=2,
+        )
+    logging.info("Wrote run manifest: %s", manifest_path)
+
+
+def _connect_window(app_cfg: dict):
     backend = app_cfg.get("backend", "win32")
     title_re = app_cfg.get("window_title_regex", ".*")
     exe_path = app_cfg.get("exe_path")
@@ -216,15 +247,44 @@ def _run_workflow_cfg(cfg: dict) -> int:
     app_cfg = cfg.get("app", {})
     export_cfg = cfg.get("export", {})
     workflow = cfg.get("workflow", [])
+    manifest["app"]["backend"] = app_cfg.get("backend", "win32")
+    manifest["app"]["window_matcher"] = {
+        "title_regex": app_cfg.get("window_title_regex", ".*"),
+        "exe_path": app_cfg.get("exe_path"),
+    }
 
-    output_file = make_output_file(export_cfg.get("output_dir", "exports"))
+    if not workflow:
+        logging.error("No workflow steps found in config.")
+        manifest["error"] = "No workflow steps found in config."
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
+        return 1
+
+    output_file = make_output_file(
+        output_dir=export_cfg.get("output_dir", "exports"),
+        prefix=export_cfg.get("prefix", "valves"),
+        include_timestamp_utc=bool(export_cfg.get("include_timestamp_utc", True)),
+        include_run_id=bool(export_cfg.get("include_run_id", True)),
+    )
+
+    logging.info("Resolved output path: %s", output_file)
+    output_path = Path(output_file)
+    if output_path.exists():
+        logging.error("Output file collision detected, refusing to overwrite: %s", output_file)
+        return 1
 
     try:
         window = _connect_window(app_cfg)
         window.wait("visible", timeout=30)
     except Exception as exc:
         logging.exception("Failed to connect to target window: %s", exc)
+        manifest["error"] = f"Failed to connect to target window: {exc}"
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
         return 1
+
+    unresolvable_required_steps: list[str] = []
+    resolved_steps: list[str] = []
 
     for step in workflow:
         step_name = step.get("name", "<unnamed>")
@@ -232,40 +292,108 @@ def _run_workflow_cfg(cfg: dict) -> int:
         delay_after = float(step.get("delay_after", 0))
         action = step["action"]
         control_cfg = step["control"]
-        step_window_cfg = step.get("window")
+        required = _is_required_step(step)
         value = step.get("value")
 
         if value == "{output_file}":
             value = output_file
 
         attempt = 0
+        step_started = time.perf_counter()
+        last_error = None
         while True:
             try:
                 step_window = _resolve_step_window(window, app_cfg, step_window_cfg)
                 step_window.wait("visible", timeout=10)
                 control = _find_control(step_window, control_cfg, backend=app_cfg.get("backend", "win32"))
                 control.wait("exists enabled visible ready", timeout=10)
-                result = perform_action(control, action, value)
-                if delay_after > 0:
-                    time.sleep(delay_after)
-                logging.info("Step succeeded: %s | %s", step_name, result)
+                if dry_run:
+                    resolved_steps.append(step_name)
+                    logging.info("Dry-run step resolvable: %s | action=%s", step_name, action)
+                    print(f"[DRY-RUN] RESOLVABLE: {step_name} (action={action})")
+                    if action == "read_text":
+                        try:
+                            text = str(control.window_text())
+                            logging.info("Dry-run read_text value: %s | value=%r", step_name, text)
+                            print(f"[DRY-RUN] read_text current value for '{step_name}': {text!r}")
+                        except Exception as exc:
+                            logging.warning("Dry-run read_text capture failed: %s | error=%s", step_name, exc)
+                            print(f"[DRY-RUN] read_text capture failed for '{step_name}': {exc}")
+                else:
+                    result = perform_action(control, action, value)
+                    if delay_after > 0:
+                        time.sleep(delay_after)
+                    logging.info("Step succeeded: %s | %s", step_name, result)
                 break
             except Exception as exc:
                 attempt += 1
+                last_error = str(exc)
                 logging.warning("Step failed: %s | attempt=%s | error=%s", step_name, attempt, exc)
                 if attempt > retries:
+                    if dry_run:
+                        required_label = "required" if required else "optional"
+                        logging.error(
+                            "Dry-run step unresolvable: %s | action=%s | required=%s",
+                            step_name,
+                            action,
+                            required,
+                        )
+                        print(f"[DRY-RUN] UNRESOLVABLE ({required_label}): {step_name} (action={action})")
+                        if required:
+                            unresolvable_required_steps.append(step_name)
+                        break
                     logging.exception("Workflow failed on step: %s", step_name)
+                    manifest["workflow_steps"].append(
+                        {
+                            "name": step_name,
+                            "action": action,
+                            "passed": False,
+                            "attempts": attempt,
+                            "retries_configured": retries,
+                            "duration_seconds": round(time.perf_counter() - step_started, 3),
+                            "error": last_error,
+                        }
+                    )
+                    manifest["error"] = f"Workflow failed on step '{step_name}': {last_error}"
+                    manifest["timestamp_end_utc"] = _utc_now_iso()
+                    _write_manifest(started_at_utc, manifest)
                     return 1
                 time.sleep(1)
+
+    if dry_run:
+        logging.info(
+            "Dry-run summary: resolvable=%s | required_unresolvable=%s",
+            len(resolved_steps),
+            len(unresolvable_required_steps),
+        )
+        if unresolvable_required_steps:
+            print("[DRY-RUN] Required steps that are not resolvable:")
+            for step_name in unresolvable_required_steps:
+                print(f"  - {step_name}")
+            return 1
+        print(f"[DRY-RUN] SUCCESS: all required steps are resolvable ({len(resolved_steps)} step(s))")
+        return 0
 
     path = Path(output_file)
     if not path.exists():
         logging.error("Expected export file does not exist: %s", output_file)
+        manifest["error"] = f"Expected export file does not exist: {output_file}"
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
         return 1
 
-    if path.stat().st_size <= 0:
+    if output_path.stat().st_size <= 0:
         logging.error("Export file is empty: %s", output_file)
+        manifest["error"] = f"Export file is empty: {output_file}"
+        manifest["timestamp_end_utc"] = _utc_now_iso()
+        _write_manifest(started_at_utc, manifest)
         return 1
+
+    manifest["export"]["size_bytes"] = path.stat().st_size
+    manifest["export"]["checksum_sha256"] = _file_sha256(path)
+    manifest["overall_result"] = "success"
+    manifest["timestamp_end_utc"] = _utc_now_iso()
+    _write_manifest(started_at_utc, manifest)
 
     logging.info("Workflow completed successfully: %s", output_file)
     print(f"SUCCESS: {output_file}")
