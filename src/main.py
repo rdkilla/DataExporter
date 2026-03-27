@@ -1,6 +1,5 @@
 import argparse
 
-from src.builder import build_executable
 from src.logging_setup import setup_logging
 from src.runner import run_workflow
 from src.scheduler import run_daemon
@@ -20,7 +19,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     run_parser = subparsers.add_parser("run", help="Run saved workflow")
-    daemon_parser = subparsers.add_parser("daemon", help="Run workflow on a schedule")
+    run_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to workflow config JSON",
+    )
+
+    check_parser = subparsers.add_parser("check", help="Validate workflow config")
+    check_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to workflow config JSON",
+    )
+    check_parser.add_argument(
+        "--resolve-selectors",
+        action="store_true",
+        help="Try to resolve window/control selectors without performing actions",
+    )
 
     package_parser = subparsers.add_parser("package", help="Build a standalone executable with PyInstaller")
     package_parser.add_argument(
@@ -90,6 +105,8 @@ def main() -> int:
     args = build_parser().parse_args()
 
     if args.command == "trainer":
+        from src.trainer import run_trainer
+
         return run_trainer(backend=args.backend)
 
     if args.command == "run":
@@ -98,7 +115,14 @@ def main() -> int:
     if args.command == "daemon":
         return run_daemon(args.config, state_path=args.state_file)
 
+    if args.command == "check":
+        from src.runner import check_workflow
+
+        return check_workflow(args.config, resolve_selectors=args.resolve_selectors)
+
     if args.command == "package":
+        from src.builder import build_executable
+
         return build_executable(
             executable_name=args.name,
             one_file=not args.onedir,

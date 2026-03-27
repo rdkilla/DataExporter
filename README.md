@@ -95,6 +95,20 @@ Useful options:
 - `--no-clean` keep PyInstaller cache.
 - `--pyinstaller-arg <arg>` pass through additional PyInstaller arguments (repeatable).
 
+### 4) Check mode
+
+Validate workflow configuration before running automation.
+
+```bash
+python -m src check --config configs/vendor_export.json
+```
+
+Optionally perform selector connectivity checks without executing actions:
+
+```bash
+python -m src check --config configs/vendor_export.json --resolve-selectors
+```
+
 > For best compatibility with older targets (such as Windows 7), build on a Windows machine that closely matches the target environment.
 
 ---

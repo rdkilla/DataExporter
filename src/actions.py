@@ -1,6 +1,3 @@
-from pywinauto.keyboard import send_keys
-
-
 SUPPORTED_ACTIONS = [
     "click_input",
     "double_click_input",
@@ -54,6 +51,8 @@ def perform_action(control, action: str, value: str | None = None) -> str:
     if action == "send_keys":
         if value is None:
             raise ValueError("send_keys requires a value")
+        from pywinauto.keyboard import send_keys
+
         send_keys(value)
         return "global keys sent"
 

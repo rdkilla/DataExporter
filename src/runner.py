@@ -7,10 +7,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from pywinauto import Application, Desktop
-
 from src.actions import perform_action
 from src.config_io import load_json
+from src.config_validation import validate_config
 from src.utils import make_output_file
 
 _ALERT_STATE_FILE = ".data_exporter_alert_state.json"
@@ -52,7 +51,7 @@ def _connect_window(app_cfg: dict):
     title_re = app_cfg.get("window_title_regex", ".*")
     exe_path = app_cfg.get("exe_path")
 
-    if exe_path and Path(exe_path).exists():
+    if launch_if_needed and exe_path and Path(exe_path).exists():
         try:
             app = Application(backend=backend).start(exe_path)
             time.sleep(2)
