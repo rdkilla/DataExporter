@@ -171,7 +171,11 @@ Alert behaviors:
 - On Windows hosts with `pywin32` Event Log support available, matching Windows Event Log entries are also written.
 
 ### Notes
-- The runner generates timestamped CSV paths under `export.output_dir`.
+- The runner generates CSV paths under `export.output_dir` using an optional naming template.
+  - `prefix` sets the filename prefix (for site/unit/vendor ID).
+  - `include_timestamp_utc` adds `YYYY-MM-DD_HHMMSS` in UTC.
+  - `include_run_id` adds a short unique suffix to reduce collisions.
+- Example output: `valves_2026-03-27_153045_a1b2c3d4.csv`.
 - If a step `value` is `"{output_file}"`, it is replaced with the generated path.
 - Each step retries according to its `retries` field.
 - `export.schedule` accepts either a 5-field cron expression (for example `0 */6 * * *`) or intervals such as `every 6 hours`, `30m`, or `1d`.

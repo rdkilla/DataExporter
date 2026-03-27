@@ -261,8 +261,18 @@ def _run_workflow_cfg(cfg: dict) -> int:
         _write_manifest(started_at_utc, manifest)
         return 1
 
-    output_file = make_output_file(export_cfg.get("output_dir", "exports"))
-    manifest["export"]["path"] = output_file
+    output_file = make_output_file(
+        output_dir=export_cfg.get("output_dir", "exports"),
+        prefix=export_cfg.get("prefix", "valves"),
+        include_timestamp_utc=bool(export_cfg.get("include_timestamp_utc", True)),
+        include_run_id=bool(export_cfg.get("include_run_id", True)),
+    )
+
+    logging.info("Resolved output path: %s", output_file)
+    output_path = Path(output_file)
+    if output_path.exists():
+        logging.error("Output file collision detected, refusing to overwrite: %s", output_file)
+        return 1
 
     try:
         window = _connect_window(app_cfg)
@@ -373,7 +383,7 @@ def _run_workflow_cfg(cfg: dict) -> int:
         _write_manifest(started_at_utc, manifest)
         return 1
 
-    if path.stat().st_size <= 0:
+    if output_path.stat().st_size <= 0:
         logging.error("Export file is empty: %s", output_file)
         manifest["error"] = f"Export file is empty: {output_file}"
         manifest["timestamp_end_utc"] = _utc_now_iso()
