@@ -69,7 +69,17 @@ Execute a saved workflow JSON.
 python -m src run --config configs/vendor_export.json
 ```
 
-### 3) Package mode
+### 3) Daemon mode
+
+Run continuously using `export.schedule` and persist run metadata to a local state file.
+
+```bash
+python -m src daemon --config configs/vendor_export.json --state-file state/run_history.json
+```
+
+On startup, daemon mode inspects `state/run_history.json`, detects missed scheduling windows, and performs capped catch-up runs based on `export.max_missed_runs_to_catch_up`.
+
+### 4) Package mode
 
 Build a distributable executable with PyInstaller.
 
@@ -101,7 +111,11 @@ The runner expects JSON shaped like:
     "exe_path": "C:/Path/To/VendorApp.exe"
   },
   "export": {
-    "output_dir": "exports"
+    "output_dir": "exports",
+    "schedule": "every 6 hours",
+    "timezone": "America/Chicago",
+    "max_missed_runs_to_catch_up": 3,
+    "quiet_hours": { "start": "22:00", "end": "06:00" }
   },
   "alerts": {
     "enabled": true,
@@ -160,6 +174,11 @@ Alert behaviors:
 - The runner generates timestamped CSV paths under `export.output_dir`.
 - If a step `value` is `"{output_file}"`, it is replaced with the generated path.
 - Each step retries according to its `retries` field.
+- `export.schedule` accepts either a 5-field cron expression (for example `0 */6 * * *`) or intervals such as `every 6 hours`, `30m`, or `1d`.
+- `export.timezone` uses IANA names (for example `America/Chicago`).
+- `export.max_missed_runs_to_catch_up` caps backlog execution on daemon startup.
+- Optional `export.quiet_hours` (string `HH:MM-HH:MM` or object with `start`/`end`) defers executions during quiet windows.
+- Daemon run history is stored at `state/run_history.json` by default with each run's planned time, execution timestamps, success/failure, catch-up marker, and output file path.
 
 ---
 

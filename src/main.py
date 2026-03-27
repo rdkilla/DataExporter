@@ -3,6 +3,7 @@ import argparse
 from src.builder import build_executable
 from src.logging_setup import setup_logging
 from src.runner import run_workflow
+from src.scheduler import run_daemon
 from src.trainer import run_trainer
 
 
@@ -19,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     run_parser = subparsers.add_parser("run", help="Run saved workflow")
+    daemon_parser = subparsers.add_parser("daemon", help="Run workflow on a schedule")
 
     package_parser = subparsers.add_parser("package", help="Build a standalone executable with PyInstaller")
     package_parser.add_argument(
@@ -64,6 +66,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to workflow config JSON",
     )
 
+    daemon_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to workflow config JSON",
+    )
+    daemon_parser.add_argument(
+        "--state-file",
+        default="state/run_history.json",
+        help="Path to scheduler state history JSON",
+    )
+
     return parser
 
 
@@ -76,6 +89,9 @@ def main() -> int:
 
     if args.command == "run":
         return run_workflow(args.config)
+
+    if args.command == "daemon":
+        return run_daemon(args.config, state_path=args.state_file)
 
     if args.command == "package":
         return build_executable(
