@@ -178,6 +178,24 @@ Trainer/runner actions currently supported:
 - **Workflow succeeds but no file appears**: verify export dialog behavior and that a step writes `"{output_file}"` to the correct field.
 - **Packaging works but EXE fails on target machine**: rebuild on a machine matching target OS and architecture.
 
+## Run manifests
+
+Each `run` attempt now writes a JSON manifest to `logs/manifests/` with a unique, append-only filename per run:
+
+- `logs/manifests/YYYY-MM-DD_HHMMSS_microseconds_run.json`
+
+Manifest records include:
+- UTC run start/end timestamps.
+- Config path and config SHA-256 checksum.
+- App backend and window matcher details used.
+- Per-step status (pass/fail), retry/attempt counts, and step duration.
+- Export output path, file size, and file SHA-256 checksum when export succeeds.
+- Overall result and any captured error details.
+
+### Retention policy
+
+Manifest files are intentionally append-only to preserve audit history. Keep at least **90 days** of manifest files for operational traceability. Older files can be archived or deleted according to your site policy/capacity constraints.
+
 ---
 
 ## Project scope
