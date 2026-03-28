@@ -66,8 +66,19 @@ def build_executable(
 
     exit_code = _run_command(command)
     if exit_code == 0:
-        exe_suffix = ".exe" if platform.system().lower() == "windows" else ""
-        output_name = f"{executable_name}{exe_suffix}"
-        output_path = Path(dist_dir) / output_name
-        logger.info("Packaging complete. Output: %s", output_path)
+        if one_file:
+            exe_suffix = ".exe" if platform.system().lower() == "windows" else ""
+            output_name = f"{executable_name}{exe_suffix}"
+            output_path = Path(dist_dir) / output_name
+            logger.info("Packaging complete (onefile). Expected output: %s", output_path)
+            logger.info("Next step: run or distribute this single executable.")
+        else:
+            output_path = Path(dist_dir) / executable_name
+            logger.info("Packaging complete (onedir). Expected output folder: %s", output_path)
+            logger.info("Next step: run the executable found inside this folder with its bundled dependencies.")
+
+        if output_path.exists():
+            logger.info("Verified packaged artifact exists at: %s", output_path)
+        else:
+            logger.warning("Expected packaged artifact not found at: %s", output_path)
     return exit_code

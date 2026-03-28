@@ -117,6 +117,10 @@ Useful options:
 - `--no-clean` keep PyInstaller cache.
 - `--pyinstaller-arg <arg>` pass through additional PyInstaller arguments (repeatable).
 
+Artifact location by package mode:
+- Default onefile mode outputs `dist/<name>.exe` on Windows and `dist/<name>` on non-Windows hosts.
+- `--onedir` mode outputs a folder at `dist/<name>/`; the runnable executable is inside that folder with bundled dependencies.
+
 ### 4) Check mode
 
 Validate workflow configuration before running automation.
