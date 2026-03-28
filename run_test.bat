@@ -1,16 +1,16 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 set "ROOT_DIR=%~dp0"
 if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
 set "CONFIG_DIR=%ROOT_DIR%\configs"
 set "CONFIG_PATH=%CONFIG_DIR%\basic_test_config.json"
 
-if not exist "%CONFIG_DIR%" mkdir "%CONFIG_DIR%"
-if not exist "%ROOT_DIR%\test_exports" mkdir "%ROOT_DIR%\test_exports"
-if not exist "%ROOT_DIR%\test_alerts" mkdir "%ROOT_DIR%\test_alerts"
+if not exist "!CONFIG_DIR!" mkdir "!CONFIG_DIR!"
+if not exist "!ROOT_DIR!\test_exports" mkdir "!ROOT_DIR!\test_exports"
+if not exist "!ROOT_DIR!\test_alerts" mkdir "!ROOT_DIR!\test_alerts"
 
-if not exist "%CONFIG_PATH%" (
+if not exist "!CONFIG_PATH!" (
   (
     echo {
     echo   "app": {
@@ -68,26 +68,26 @@ if not exist "%CONFIG_PATH%" (
     echo     }
     echo   ]
     echo }
-  ) > "%CONFIG_PATH%"
-  echo Created basic test config: %CONFIG_PATH%
+  ) > "!CONFIG_PATH!"
+  echo Created basic test config: !CONFIG_PATH!
 ) else (
-  echo Using existing config: %CONFIG_PATH%
+  echo Using existing config: !CONFIG_PATH!
 )
 
-if not exist "%ROOT_DIR%\.venv\Scripts\python.exe" (
-  py -3 -m venv "%ROOT_DIR%\.venv" || python -m venv "%ROOT_DIR%\.venv"
+if not exist "!ROOT_DIR!\.venv\Scripts\python.exe" (
+  py -3 -m venv "!ROOT_DIR!\.venv" || python -m venv "!ROOT_DIR!\.venv"
 )
 
-call "%ROOT_DIR%\.venv\Scripts\activate.bat"
+call "!ROOT_DIR!\.venv\Scripts\activate.bat"
 python -m pip install --upgrade pip >nul
-python -m pip install -r "%ROOT_DIR%\requirements.txt"
-python -m src check --config "%CONFIG_PATH%"
+python -m pip install -r "!ROOT_DIR!\requirements.txt"
+python -m src check --config "!CONFIG_PATH!"
 if errorlevel 1 goto :error
 
 echo.
 echo Config check passed. Next steps (Windows host with vendor app open):
 echo   python -m src trainer --backend win32
-echo   python -m src run --config "%CONFIG_PATH%"
+echo   python -m src run --config "!CONFIG_PATH!"
 
 goto :eof
 
