@@ -251,6 +251,50 @@ Trainer/runner actions currently supported:
 
 ---
 
+## Operational FAQ
+
+### Does this set the frequency of pulling data?
+
+Yes. In daemon mode, the frequency is controlled by `export.schedule` in the config file.
+
+- Interval examples: `every 6 hours`, `30m`, `1d`
+- Cron example: `0 */6 * * *`
+
+`export.timezone` controls how schedule times are interpreted. If you define `export.quiet_hours`, scheduled runs inside that window are deferred until quiet hours end.
+
+### Is it user-friendly to run?
+
+Partially:
+
+- **Trainer mode** is interactive and helps you discover controls and build workflows.
+- **Run/daemon mode** are CLI-first and intended for operators or scripts.
+
+If your team prefers point-and-click setup/operations, adding a small GUI may improve onboarding.
+
+### Can we register the executable as a service and run in the background?
+
+The tool can be packaged as a Windows executable, and the daemon command is designed to run continuously. Service registration is not built in to this repository, but you can typically host the packaged executable with standard Windows service wrappers (for example NSSM/Task Scheduler/service host tooling) depending on your environment policies.
+
+### Is it visible in the system tray?
+
+No. There is no tray icon implementation in this project today.
+
+### Does it have any form of GUI?
+
+It has an interactive **text-based** trainer in the terminal, but no desktop GUI window/forms.
+
+### Is it worth adding a GUI?
+
+Usually yes if multiple non-technical operators must maintain workflows, monitor status, or acknowledge alerts. If a small technical team is comfortable with JSON + CLI, the current approach is simpler and lower maintenance.
+
+Good incremental path:
+
+1. Keep runner/daemon engine as-is.
+2. Add a lightweight GUI only for config editing, validation (`check`), and start/stop status.
+3. Optionally add tray notifications and last-run health view.
+
+---
+
 
 ## Operator response playbook
 
