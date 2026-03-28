@@ -51,6 +51,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Try to resolve window/control selectors without performing actions",
     )
 
+    init_parser = subparsers.add_parser("init", help="Generate a starter workflow config")
+    init_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path where starter workflow config JSON will be written",
+    )
+    init_parser.add_argument(
+        "--backend",
+        default="win32",
+        choices=["win32", "uia"],
+        help="pywinauto backend for generated config",
+    )
+    init_parser.add_argument(
+        "--output-dir",
+        default="exports",
+        help="Default export output directory",
+    )
+    init_parser.add_argument(
+        "--schedule",
+        default="every 6 hours",
+        help="Default export schedule (cron or interval form)",
+    )
+    init_parser.add_argument(
+        "--timezone",
+        default="UTC",
+        help="Default IANA timezone for schedule interpretation",
+    )
+
     package_parser = subparsers.add_parser("package", help="Build a standalone executable with PyInstaller")
     package_parser.add_argument(
         "--name",
@@ -115,6 +143,17 @@ def main() -> int:
         from src.runner import check_workflow
 
         return check_workflow(args.config, resolve_selectors=args.resolve_selectors)
+
+    if args.command == "init":
+        from src.init_config import init_config
+
+        return init_config(
+            config_path=args.config,
+            backend=args.backend,
+            output_dir=args.output_dir,
+            schedule=args.schedule,
+            timezone=args.timezone,
+        )
 
     if args.command == "package":
         from src.builder import build_executable
