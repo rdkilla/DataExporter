@@ -1,5 +1,6 @@
 from pathlib import Path
 from zoneinfo import ZoneInfo
+import math
 import ntpath
 import re
 
@@ -13,6 +14,17 @@ REQUIRED_STEP_KEYS = ("name", "control", "action")
 ACTIONS_REQUIRING_VALUE = {"set_text", "type_keys", "send_keys"}
 SUPPORTED_BACKENDS = {"win32", "uia"}
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+SECURITY_BOOL_FIELDS = (
+    "allow_global_send_keys",
+    "interactive_confirmation_required",
+    "require_focused_window_for_keyboard_input",
+    "allow_unfocused_window_keyboard_input",
+    "allow_dangerous_key_chords",
+)
+STEP_RETRIES_MIN = 0
+STEP_RETRIES_MAX = 10
+STEP_DELAY_AFTER_MIN = 0.0
+STEP_DELAY_AFTER_MAX = 30.0
 
 
 def _is_absolute_path(value: str) -> bool:
