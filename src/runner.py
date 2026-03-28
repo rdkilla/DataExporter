@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +14,7 @@ from src.utils import make_output_file
 
 _ALERT_STATE_FILE = ".data_exporter_alert_state.json"
 _EVENT_LOG_SOURCE = "DataExporter"
+_DEFAULT_NOW_FORMAT = "%Y-%m-%d_%H%M%S"
 
 
 def _utc_now() -> datetime:
@@ -74,6 +76,37 @@ def _connect_window(app_cfg: dict):
 
     desktop = Desktop(backend=backend)
     return desktop.window(title_re=title_re)
+
+
+_NOW_MACRO_PATTERN = re.compile(r"\{now(?::([^{}]+))?\}")
+
+
+def _resolve_step_value(value: Any, *, output_file: str, now_utc: datetime) -> Any:
+    """
+    Resolve runtime macros for a workflow step value.
+
+    Supported macros:
+    - {output_file}: full generated output path for the current run.
+    - {now}: UTC timestamp using _DEFAULT_NOW_FORMAT.
+    - {now:<strftime>}: UTC timestamp using a custom strftime pattern.
+
+    Any non-string value is returned unchanged.
+    """
+    if not isinstance(value, str):
+        return value
+
+    resolved = value.replace("{output_file}", output_file)
+
+    def _replace_now(match: re.Match[str]) -> str:
+        fmt = match.group(1)
+        if not fmt:
+            return now_utc.strftime(_DEFAULT_NOW_FORMAT)
+        try:
+            return now_utc.strftime(fmt)
+        except Exception as exc:
+            raise ValueError(f"Invalid {{now:...}} strftime format '{fmt}' in step value '{value}'") from exc
+
+    return _NOW_MACRO_PATTERN.sub(_replace_now, resolved)
 
 
 def _find_control(window, control_cfg: dict, backend: str = "win32"):
@@ -308,6 +341,7 @@ def _run_workflow_cfg(cfg: dict, *, dry_run: bool = False) -> tuple[int, str | N
 
     unresolvable_required_steps: list[str] = []
     resolved_steps: list[str] = []
+    macro_now_utc = _utc_now()
 
     for step in workflow:
         step_name = step.get("name", "<unnamed>")
@@ -317,10 +351,7 @@ def _run_workflow_cfg(cfg: dict, *, dry_run: bool = False) -> tuple[int, str | N
         control_cfg = step["control"]
         step_window_cfg = step.get("window")
         required = _is_required_step(step)
-        value = step.get("value")
-
-        if value == "{output_file}":
-            value = output_file
+        value = _resolve_step_value(step.get("value"), output_file=output_file, now_utc=macro_now_utc)
 
         attempt = 0
         step_started = time.perf_counter()

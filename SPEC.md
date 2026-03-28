@@ -10,6 +10,11 @@ Phase 1 only. No direct controller integration, no protocol reverse engineering,
 ## Core use case
 A user opens the vendor app on the same Windows machine. Our utility runs locally, discovers available windows, lets the user select the vendor window, enumerates visible controls, allows trying actions like click/focus/type/read text, and saves successful mappings into a config file. Later, the runner uses that config to perform exports into a chosen local folder.
 
+Workflow step values must support runtime filename/path macros so Save dialog steps can produce time-stamped output names:
+- `{output_file}` inserts the generated run output path.
+- `{now}` inserts current UTC timestamp (`YYYY-MM-DD_HHMMSS`).
+- `{now:<strftime>}` inserts current UTC timestamp with a custom `strftime` format.
+
 ## Constraints
 - Target machine is offline.
 - Likely Windows 7.
