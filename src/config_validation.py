@@ -190,6 +190,25 @@ def validate_config(config: dict, *, base_dir: str | Path | None = None) -> list
                         f"'alerts.output_path' is not writable within approved base '{approved_base}': {exc}"
                     )
 
+    security = config.get("security")
+    if security is not None:
+        if not isinstance(security, dict):
+            errors.append("'security' must be an object when provided.")
+        else:
+            for field in SECURITY_BOOL_FIELDS:
+                value = security.get(field)
+                if value is not None and not isinstance(value, bool):
+                    errors.append(f"'security.{field}' must be a boolean when provided.")
+
+            denylist = security.get("dangerous_key_chords_denylist")
+            if denylist is not None:
+                if not isinstance(denylist, list):
+                    errors.append("'security.dangerous_key_chords_denylist' must be a list of strings.")
+                elif not all(isinstance(item, str) and item.strip() for item in denylist):
+                    errors.append(
+                        "'security.dangerous_key_chords_denylist' must contain only non-empty strings."
+                    )
+
     workflow = config.get("workflow")
     if not isinstance(workflow, list):
         errors.append("'workflow' must be a list of step objects.")

@@ -17,6 +17,21 @@ def make_base_config(backend: str, window_title_regex: str, exe_path: str | None
             "quiet_hours": None,
         },
         "workflow": [],
+        "security": {
+            "allow_global_send_keys": False,
+            "interactive_confirmation_required": False,
+            "require_focused_window_for_keyboard_input": True,
+            "allow_unfocused_window_keyboard_input": False,
+            "allow_dangerous_key_chords": False,
+            "dangerous_key_chords_denylist": [
+                "^%{DELETE}",
+                "%{F4}",
+                "#{l}",
+                "#{r}",
+                "^{ESC}",
+                "#{d}",
+            ],
+        },
         "alerts": {
             "enabled": False,
             "failure_threshold": 3,
