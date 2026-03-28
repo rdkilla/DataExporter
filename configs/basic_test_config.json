@@ -2,7 +2,13 @@
   "app": {
     "backend": "win32",
     "window_title_regex": ".*Vendor App.*",
-    "exe_path": "C:\\Program Files\\Vendor\\App.exe"
+    "exe_path": "C:\\Program Files\\Vendor\\App.exe",
+    "allowed_exe_roots": [
+      "C:\\Program Files\\Vendor"
+    ],
+    "allowed_exe_names": [
+      "App.exe"
+    ]
   },
   "export": {
     "output_dir": "test_exports",
