@@ -16,7 +16,13 @@ if not exist "!CONFIG_PATH!" (
     echo   "app": {
     echo     "backend": "win32",
     echo     "window_title_regex": ".*Vendor App.*",
-    echo     "exe_path": "C:\\Program Files\\Vendor\\App.exe"
+    echo     "exe_path": "C:\\Program Files\\Vendor\\App.exe",
+    echo     "allowed_exe_roots": [
+    echo       "C:\\Program Files\\Vendor"
+    echo     ],
+    echo     "allowed_exe_names": [
+    echo       "App.exe"
+    echo     ]
     echo   },
     echo   "export": {
     echo     "output_dir": "test_exports",
