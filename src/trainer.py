@@ -9,34 +9,79 @@ from src.utils import ask_float, ask_int
 from src.window_discovery import list_windows
 
 
-def run_trainer(backend: str = "win32") -> int:
-    icons = _menu_icons()
-    advanced_menu = _advanced_menu_available()
+RESET = "\033[0m"
+STYLES = {
+    "heading": "\033[1;36m",
+    "success": "\033[1;32m",
+    "error": "\033[1;31m",
+    "hint": "\033[0;33m",
+    "row": "\033[0;37m",
+}
+
+
+def _should_use_color(no_color: bool) -> bool:
+    if no_color:
+        return False
+    return sys.stdout.isatty()
+
+
+def _style(text: str, tone: str, use_color: bool) -> str:
+    if not use_color:
+        return text
+    return f"{STYLES[tone]}{text}{RESET}"
+
+
+def print_heading(text: str, *, use_color: bool) -> None:
+    print(_style(f"\n{text}:\n", "heading", use_color))
+
+
+def print_row(text: str, *, use_color: bool) -> None:
+    print(_style(text, "row", use_color))
+
+
+def print_success(text: str, *, use_color: bool) -> None:
+    print(_style(text, "success", use_color))
+
+
+def print_error(text: str, *, use_color: bool) -> None:
+    print(_style(text, "error", use_color))
+
+
+def print_hint(text: str, *, use_color: bool) -> None:
+    print(_style(text, "hint", use_color))
+
+
+def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
+    use_color = _should_use_color(no_color)
     windows = list_windows(backend=backend, include_hidden=False)
     if not windows:
         windows = list_windows(backend=backend, include_hidden=True)
     if not windows:
-        print(f"{icons['error']} No windows found.")
+        print_error("No windows found.", use_color=use_color)
         return 1
 
-    print(f"\n{icons['pointer']} Window picker\n")
+    print_heading("Open windows", use_color=use_color)
     if backend == "win32":
-        print(f"{icons['warn']} Tip: If controls look empty on Windows 11, retry with '--backend uia'.\n")
-    _print_window_menu(windows)
+        print_hint("Tip: If controls look empty on Windows 11, retry with '--backend uia'.", use_color=use_color)
+    for i, window in enumerate(windows):
+        print_row(
+            f"[{i}] title='{window['title']}' "
+            f"class='{window['class_name']}' handle='{window['handle']}' "
+            f"pid='{window['process_id']}' visible={window['visible']}",
+            use_color=use_color,
+        )
 
-    selected_index = _prompt_pick_index(
-        windows,
-        prompt=f"\n{icons['pointer']} Select window index: ",
-        invalid_message=f"{icons['error']} Invalid selection.",
-    )
-    if selected_index is None:
+    try:
+        selected_window = windows[ask_int("\nSelect window number: ")]
+    except Exception:
+        print_error("Invalid selection.", use_color=use_color)
         return 1
     selected_window = windows[selected_index]
 
     wrapper = selected_window["wrapper"]
     controls = list_controls(wrapper)
     if not controls:
-        print(f"{icons['error']} No controls found.")
+        print_error("No controls found.", use_color=use_color)
         return 1
 
     workflow_steps = []
@@ -44,17 +89,17 @@ def run_trainer(backend: str = "win32") -> int:
     page_size = 25
     page = 0
     while True:
-        if advanced_menu:
-            filtered = _filter_controls(controls, filter_text=filter_text)
-            max_page = max((len(filtered) - 1) // page_size, 0)
-            page = min(page, max_page)
-            print()
-            _print_controls_menu(
-                filtered,
-                page=page,
-                page_size=page_size,
-                filter_text=filter_text,
-                max_items=300,
+        print_heading("Controls", use_color=use_color)
+        for i, control in enumerate(controls[:300]):
+            info = control_to_dict(control)
+            display_name = info["name"] or "<no name>"
+            display_type = info["control_type"] or "<unknown>"
+            display_class = info["class_name"] or "<unknown>"
+            print_row(
+                f"[{i}] Name='{display_name}' | Type='{display_type}' | "
+                f"Class='{display_class}' | AutomationId='{info['automation_id']}' | "
+                f"Enabled={info['enabled']} Visible={info['visible']}",
+                use_color=use_color,
             )
             choice = input(
                 "\nSelect control index | commands: [n]ext [p]rev [f]ilter [d]etails [s]ave [q]uit: "
@@ -76,55 +121,22 @@ def run_trainer(backend: str = "win32") -> int:
         if choice == "q":
             return 0
         if choice == "s":
-            return _save_workflow(backend, selected_window, workflow_steps)
-        if not advanced_menu:
-            pass
-        elif choice == "n":
-            if page < max_page:
-                page += 1
-            else:
-                print(f"{icons['warn']} Already at last page.")
-            continue
-        elif choice == "p":
-            if page > 0:
-                page -= 1
-            else:
-                print(f"{icons['warn']} Already at first page.")
-            continue
-        elif choice == "f":
-            filter_text = input("Filter text (name/type/class, blank clears): ").strip().lower()
-            page = 0
-            continue
-        elif choice.startswith("d"):
-            details_raw = choice[1:].strip()
-            if not details_raw:
-                details_raw = input("Details for control index: ").strip()
-            if not details_raw.isdigit():
-                print(f"{icons['error']} Invalid detail index.")
-                continue
-            details_idx = int(details_raw)
-            if details_idx < 0 or details_idx >= len(controls):
-                print(f"{icons['error']} Detail index out of range.")
-                continue
-            control_meta = control_to_dict(controls[details_idx])
-            print("\nControl details:")
-            for key, value in control_meta.items():
-                print(f"- {key}: {value}")
-            continue
+            return _save_workflow(backend, selected_window, workflow_steps, use_color=use_color)
 
         try:
             control = controls[int(choice)]
             selected_control_index = int(choice)
         except Exception:
-            print(f"{icons['error']} Invalid control selection.")
+            print_error("Invalid control selection.", use_color=use_color)
             continue
 
         control_meta = control_to_dict(control)
-        print("\nControl details:")
+        print_heading("Control details", use_color=use_color)
         for key, value in control_meta.items():
-            print(f"- {key}: {value}")
+            print_row(f"- {key}: {value}", use_color=use_color)
 
-        _print_action_menu()
+        for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
+            print_row(f"{idx}. {action}", use_color=use_color)
 
         raw_action = input(f"{icons['pointer']} Choose action number (or blank to cancel): ").strip()
         if not raw_action:
@@ -132,7 +144,7 @@ def run_trainer(backend: str = "win32") -> int:
         try:
             action = SUPPORTED_ACTIONS[int(raw_action) - 1]
         except Exception:
-            print(f"{icons['error']} Invalid action.")
+            print_error("Invalid action.", use_color=use_color)
             continue
 
         value = None
@@ -143,9 +155,9 @@ def run_trainer(backend: str = "win32") -> int:
 
         try:
             result = perform_action(control, action, value)
-            print(f"{icons['ok']} Action completed: {result}")
+            print_success(f"Action completed: {result}", use_color=use_color)
         except Exception as exc:
-            print(f"{icons['error']} Action failed: {exc}")
+            print_error(f"Action failed: {exc}", use_color=use_color)
             continue
 
         should_add = input("Add this action to workflow? [y/N]: ").strip().lower()
@@ -182,12 +194,12 @@ def run_trainer(backend: str = "win32") -> int:
                 },
             )
         )
-        print(f"{icons['ok']} Step saved in session. Total steps: {len(workflow_steps)}")
+        print_success(f"Step saved in session. Total steps: {len(workflow_steps)}", use_color=use_color)
 
 
-def _save_workflow(backend: str, selected_window: dict, workflow_steps: list) -> int:
+def _save_workflow(backend: str, selected_window: dict, workflow_steps: list, *, use_color: bool) -> int:
     if not workflow_steps:
-        print("No workflow steps collected. Nothing to save.")
+        print_error("No workflow steps collected. Nothing to save.", use_color=use_color)
         return 0
 
     output_dir = input("Export output directory [exports]: ").strip() or "exports"
@@ -203,7 +215,7 @@ def _save_workflow(backend: str, selected_window: dict, workflow_steps: list) ->
     config["workflow"] = workflow_steps
 
     save_json(config_path, config, base_dir=Path.cwd())
-    print(f"Saved workflow to {config_path}")
+    print_success(f"Saved workflow to {config_path}", use_color=use_color)
     return 0
 
 
