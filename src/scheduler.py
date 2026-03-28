@@ -3,7 +3,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime, time as dt_time, timedelta
+from datetime import datetime, time as dt_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -184,9 +184,9 @@ def run_daemon(config_path: str, state_path: str = "state/run_history.json") -> 
 
 
 def _execute_and_persist(config_path: str, state_path: str, planned_time: datetime, catch_up: bool) -> None:
-    started_at = datetime.now(UTC)
+    started_at = datetime.now(timezone.utc)
     result = run_workflow_with_metadata(config_path)
-    completed_at = datetime.now(UTC)
+    completed_at = datetime.now(timezone.utc)
 
     record = {
         "planned_time": planned_time.isoformat(),

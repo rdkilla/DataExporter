@@ -1,9 +1,6 @@
 import argparse
 
 from src.logging_setup import setup_logging
-from src.runner import run_workflow
-from src.scheduler import run_daemon
-from src.trainer import run_trainer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -23,6 +20,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--config",
         required=True,
         help="Path to workflow config JSON",
+    )
+    run_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate workflow control resolution without performing UI actions",
+    )
+
+    daemon_parser = subparsers.add_parser("daemon", help="Run scheduled daemon")
+    daemon_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to workflow config JSON",
+    )
+    daemon_parser.add_argument(
+        "--state-file",
+        default="state/run_history.json",
+        help="Path to scheduler state history JSON",
     )
 
     check_parser = subparsers.add_parser("check", help="Validate workflow config")
@@ -75,28 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extra raw argument passed to PyInstaller (can be repeated)",
     )
 
-    run_parser.add_argument(
-        "--config",
-        required=True,
-        help="Path to workflow config JSON",
-    )
-    run_parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Validate workflow control resolution without performing UI actions",
-    )
-
-    daemon_parser.add_argument(
-        "--config",
-        required=True,
-        help="Path to workflow config JSON",
-    )
-    daemon_parser.add_argument(
-        "--state-file",
-        default="state/run_history.json",
-        help="Path to scheduler state history JSON",
-    )
-
     return parser
 
 
@@ -110,9 +102,13 @@ def main() -> int:
         return run_trainer(backend=args.backend)
 
     if args.command == "run":
+        from src.runner import run_workflow
+
         return run_workflow(args.config, dry_run=args.dry_run)
 
     if args.command == "daemon":
+        from src.scheduler import run_daemon
+
         return run_daemon(args.config, state_path=args.state_file)
 
     if args.command == "check":
