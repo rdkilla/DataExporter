@@ -36,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["win32", "uia"],
         help="pywinauto backend",
     )
+    trainer_parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI color output in trainer mode",
+    )
 
     run_parser = subparsers.add_parser("run", help="Run saved workflow")
     run_parser.add_argument(
@@ -165,7 +170,7 @@ def main() -> int:
     if args.command == "trainer":
         from src.trainer import run_trainer
 
-        return run_trainer(backend=args.backend)
+        return run_trainer(backend=args.backend, no_color=args.no_color)
 
     if args.command == "run":
         from src.runner import run_workflow

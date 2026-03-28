@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from src.actions import SUPPORTED_ACTIONS, perform_action
@@ -8,77 +9,114 @@ from src.utils import ask_float, ask_int
 from src.window_discovery import list_windows
 
 
-def _print_how_to_use_panel(backend: str) -> None:
-    print("\nHow to use trainer:")
-    print("  1) Pick a target window.")
-    print("  2) Pick a control, run an action, and confirm adding it.")
-    print("  3) Save when your steps look good.\n")
-    if backend == "win32":
-        print("Tip: If controls look empty on Windows 11, retry with '--backend uia'.\n")
+RESET = "\033[0m"
+STYLES = {
+    "heading": "\033[1;36m",
+    "success": "\033[1;32m",
+    "error": "\033[1;31m",
+    "hint": "\033[0;33m",
+    "row": "\033[0;37m",
+}
 
 
-def run_trainer(backend: str = "win32") -> int:
+def _should_use_color(no_color: bool) -> bool:
+    if no_color:
+        return False
+    return sys.stdout.isatty()
+
+
+def _style(text: str, tone: str, use_color: bool) -> str:
+    if not use_color:
+        return text
+    return f"{STYLES[tone]}{text}{RESET}"
+
+
+def print_heading(text: str, *, use_color: bool) -> None:
+    print(_style(f"\n{text}:\n", "heading", use_color))
+
+
+def print_row(text: str, *, use_color: bool) -> None:
+    print(_style(text, "row", use_color))
+
+
+def print_success(text: str, *, use_color: bool) -> None:
+    print(_style(text, "success", use_color))
+
+
+def print_error(text: str, *, use_color: bool) -> None:
+    print(_style(text, "error", use_color))
+
+
+def print_hint(text: str, *, use_color: bool) -> None:
+    print(_style(text, "hint", use_color))
+
+
+def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
+    use_color = _should_use_color(no_color)
     windows = list_windows(backend=backend, include_hidden=False)
     if not windows:
         windows = list_windows(backend=backend, include_hidden=True)
     if not windows:
-        print("No windows found.")
+        print_error("No windows found.", use_color=use_color)
         return 1
 
-    _print_how_to_use_panel(backend)
-    print("Open windows:\n")
+    print_heading("Open windows", use_color=use_color)
+    if backend == "win32":
+        print_hint("Tip: If controls look empty on Windows 11, retry with '--backend uia'.", use_color=use_color)
     for i, window in enumerate(windows):
-        print(
+        print_row(
             f"[{i}] title='{window['title']}' "
             f"class='{window['class_name']}' handle='{window['handle']}' "
-            f"pid='{window['process_id']}' visible={window['visible']}"
+            f"pid='{window['process_id']}' visible={window['visible']}",
+            use_color=use_color,
         )
 
     try:
         selected_window = windows[ask_int("\nSelect window number: ")]
     except Exception:
-        print("Invalid selection.")
+        print_error("Invalid selection.", use_color=use_color)
         return 1
 
     wrapper = selected_window["wrapper"]
     controls = list_controls(wrapper)
     if not controls:
-        print("No controls found.")
+        print_error("No controls found.", use_color=use_color)
         return 1
 
     workflow_steps = []
     while True:
-        print("\nControls:\n")
+        print_heading("Controls", use_color=use_color)
         for i, control in enumerate(controls[:300]):
             info = control_to_dict(control)
             display_name = info["name"] or "<no name>"
             display_type = info["control_type"] or "<unknown>"
             display_class = info["class_name"] or "<unknown>"
-            print(
+            print_row(
                 f"[{i}] Name='{display_name}' | Type='{display_type}' | "
                 f"Class='{display_class}' | AutomationId='{info['automation_id']}' | "
-                f"Enabled={info['enabled']} Visible={info['visible']}"
+                f"Enabled={info['enabled']} Visible={info['visible']}",
+                use_color=use_color,
             )
 
         choice = input("\nSelect control index, or [s]ave/[q]uit: ").strip().lower()
         if choice == "q":
             return 0
         if choice == "s":
-            return _save_workflow(backend, selected_window, workflow_steps)
+            return _save_workflow(backend, selected_window, workflow_steps, use_color=use_color)
 
         try:
             control = controls[int(choice)]
         except Exception:
-            print("Invalid control selection.")
+            print_error("Invalid control selection.", use_color=use_color)
             continue
 
         control_meta = control_to_dict(control)
-        print("\nControl details:")
+        print_heading("Control details", use_color=use_color)
         for key, value in control_meta.items():
-            print(f"- {key}: {value}")
+            print_row(f"- {key}: {value}", use_color=use_color)
 
         for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
-            print(f"{idx}. {action}")
+            print_row(f"{idx}. {action}", use_color=use_color)
 
         raw_action = input("Choose action number (or blank to cancel): ").strip()
         if not raw_action:
@@ -86,7 +124,7 @@ def run_trainer(backend: str = "win32") -> int:
         try:
             action = SUPPORTED_ACTIONS[int(raw_action) - 1]
         except Exception:
-            print("Invalid action.")
+            print_error("Invalid action.", use_color=use_color)
             continue
 
         value = None
@@ -97,9 +135,9 @@ def run_trainer(backend: str = "win32") -> int:
 
         try:
             result = perform_action(control, action, value)
-            print(f"Action completed: {result}")
+            print_success(f"Action completed: {result}", use_color=use_color)
         except Exception as exc:
-            print(f"Action failed: {exc}")
+            print_error(f"Action failed: {exc}", use_color=use_color)
             continue
 
         should_add = input("Add this action to workflow? [y/N]: ").strip().lower()
@@ -136,12 +174,12 @@ def run_trainer(backend: str = "win32") -> int:
                 },
             )
         )
-        print(f"Step saved in session. Total steps: {len(workflow_steps)}")
+        print_success(f"Step saved in session. Total steps: {len(workflow_steps)}", use_color=use_color)
 
 
-def _save_workflow(backend: str, selected_window: dict, workflow_steps: list) -> int:
+def _save_workflow(backend: str, selected_window: dict, workflow_steps: list, *, use_color: bool) -> int:
     if not workflow_steps:
-        print("No workflow steps collected. Nothing to save.")
+        print_error("No workflow steps collected. Nothing to save.", use_color=use_color)
         return 0
 
     output_dir = input("Export output directory [exports]: ").strip() or "exports"
@@ -157,7 +195,7 @@ def _save_workflow(backend: str, selected_window: dict, workflow_steps: list) ->
     config["workflow"] = workflow_steps
 
     save_json(config_path, config, base_dir=Path.cwd())
-    print(f"Saved workflow to {config_path}")
+    print_success(f"Saved workflow to {config_path}", use_color=use_color)
     return 0
 
 
