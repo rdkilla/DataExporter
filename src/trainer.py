@@ -81,7 +81,9 @@ def run_trainer(backend: str = "win32") -> int:
 
         value = None
         if action in {"set_text", "type_keys", "send_keys"}:
-            value = input("Enter action value: ")
+            value = input(
+                "Enter action value (macros: {output_file}, {now}, {now:%Y%m%d_%H%M}): "
+            )
 
         try:
             result = perform_action(control, action, value)

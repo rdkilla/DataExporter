@@ -212,7 +212,12 @@ Alert behaviors:
   - `include_timestamp_utc` adds `YYYY-MM-DD_HHMMSS` in UTC.
   - `include_run_id` adds a short unique suffix to reduce collisions.
 - Example output: `valves_2026-03-27_153045_a1b2c3d4.csv`.
-- If a step `value` is `"{output_file}"`, it is replaced with the generated path.
+- Step `value` macro support:
+  - `"{output_file}"` inserts the generated export path.
+  - `"{now}"` inserts current UTC time as `YYYY-MM-DD_HHMMSS`.
+  - `"{now:%Y%m%d}"` (or any Python `strftime` pattern) inserts formatted current UTC time.
+  - Macros can be mixed in longer strings, for example: `"Daily_{now:%Y%m%d}.csv"`.
+  - `"{now...}"` macros are evaluated once per run and reused for all steps, so multi-step filenames stay consistent.
 - Each step retries according to its `retries` field.
 - `export.schedule` accepts either a 5-field cron expression (for example `0 */6 * * *`) or intervals such as `every 6 hours`, `30m`, or `1d`.
 - `export.timezone` uses IANA names (for example `America/Chicago`).
@@ -244,7 +249,7 @@ Trainer/runner actions currently supported:
 1. Launch the vendor application manually.
 2. Run trainer mode and select the correct window.
 3. Test actions on relevant controls.
-4. Add successful actions to the workflow.
+4. Add successful actions to the workflow (for filename entry steps, you can use macros like `"{output_file}"` or `"Report_{now:%Y%m%d}.csv"` as the action value).
 5. Save config JSON (for example `configs/vendor_export.json`).
 6. Run the workflow with `python -m src run --config ...`.
 7. Verify the CSV file was created and is non-empty.
