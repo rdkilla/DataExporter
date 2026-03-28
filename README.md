@@ -43,10 +43,10 @@ python -m pip install -r requirements.txt
 For a one-command smoke test, run:
 
 ```bash
-./run_test.sh
+run_test.bat
 ```
 
-The script will:
+The batch script will:
 - create `configs/basic_test_config.json` if it does not exist,
 - create a local virtual environment in `.venv`,
 - install dependencies, and
