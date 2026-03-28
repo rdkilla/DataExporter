@@ -1,12 +1,17 @@
 from src.actions import SUPPORTED_ACTIONS
 from src.scheduler import SchedulePolicy
 from zoneinfo import ZoneInfo
+import math
 
 
 REQUIRED_TOP_LEVEL_KEYS = ("app", "export", "workflow")
 REQUIRED_STEP_KEYS = ("name", "control", "action")
 ACTIONS_REQUIRING_VALUE = {"set_text", "type_keys", "send_keys"}
 SUPPORTED_BACKENDS = {"win32", "uia"}
+STEP_RETRIES_MIN = 0
+STEP_RETRIES_MAX = 10
+STEP_DELAY_AFTER_MIN = 0.0
+STEP_DELAY_AFTER_MAX = 30.0
 
 
 def validate_config(config: dict) -> list[str]:
@@ -87,6 +92,15 @@ def validate_config(config: dict) -> list[str]:
             if output_path is not None and (not isinstance(output_path, str) or not output_path.strip()):
                 errors.append("'alerts.output_path' must be a non-empty string when provided.")
 
+    logging_cfg = config.get("logging")
+    if logging_cfg is not None:
+        if not isinstance(logging_cfg, dict):
+            errors.append("'logging' must be an object when provided.")
+        else:
+            redact_ui_text = logging_cfg.get("redact_ui_text")
+            if redact_ui_text is not None and not isinstance(redact_ui_text, bool):
+                errors.append("'logging.redact_ui_text' must be a boolean when provided.")
+
     workflow = config.get("workflow")
     if not isinstance(workflow, list):
         errors.append("'workflow' must be a list of step objects.")
@@ -131,5 +145,31 @@ def validate_config(config: dict) -> list[str]:
                 errors.append(
                     f"{step_label}.value is required and must be a non-empty string for action '{action}'."
                 )
+
+        retries = step.get("retries")
+        if retries is not None:
+            if isinstance(retries, bool) or not isinstance(retries, int):
+                errors.append(
+                    f"{step_label}.retries must be an integer between {STEP_RETRIES_MIN} and {STEP_RETRIES_MAX}."
+                )
+            elif not (STEP_RETRIES_MIN <= retries <= STEP_RETRIES_MAX):
+                errors.append(
+                    f"{step_label}.retries must be between {STEP_RETRIES_MIN} and {STEP_RETRIES_MAX}."
+                )
+
+        delay_after = step.get("delay_after")
+        if delay_after is not None:
+            if isinstance(delay_after, bool) or not isinstance(delay_after, (int, float)):
+                errors.append(
+                    f"{step_label}.delay_after must be a number between {STEP_DELAY_AFTER_MIN:g} and {STEP_DELAY_AFTER_MAX:g} seconds."
+                )
+            else:
+                delay_after_float = float(delay_after)
+                if not math.isfinite(delay_after_float):
+                    errors.append(f"{step_label}.delay_after must be a finite number.")
+                elif not (STEP_DELAY_AFTER_MIN <= delay_after_float <= STEP_DELAY_AFTER_MAX):
+                    errors.append(
+                        f"{step_label}.delay_after must be between {STEP_DELAY_AFTER_MIN:g} and {STEP_DELAY_AFTER_MAX:g} seconds."
+                    )
 
     return errors
