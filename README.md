@@ -119,7 +119,7 @@ Useful options:
 
 ### 4) Check mode
 
-Validate workflow configuration before running automation.
+Validate workflow plus runtime configuration before running automation (app backend, export scheduling/timezone/quiet-hours, and alerts settings).
 
 ```bash
 python -m src check --config configs/vendor_export.json
