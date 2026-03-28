@@ -1,10 +1,18 @@
 import argparse
 
+from src.cli_theme import build_theme
 from src.logging_setup import setup_logging
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Valve Export Tool")
+    parser.add_argument(
+        "--theme",
+        choices=["minimal", "standard", "vibrant"],
+        default=None,
+        help="CLI theme mode (or set DATA_EXPORTER_THEME)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     trainer_parser = subparsers.add_parser("trainer", help="Run interactive trainer")
@@ -138,11 +146,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     setup_logging()
     args = build_parser().parse_args()
+    theme = build_theme(args.theme)
 
     if args.command == "trainer":
         from src.trainer import run_trainer
 
-        return run_trainer(backend=args.backend)
+        return run_trainer(backend=args.backend, theme=theme)
 
     if args.command == "run":
         from src.runner import run_workflow
