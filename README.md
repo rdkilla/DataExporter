@@ -79,6 +79,10 @@ python -m src trainer --backend win32
 python -m src trainer --backend uia
 ```
 
+Tips:
+- On Windows 11, `--backend uia` usually provides better control names/types for modern apps.
+- Trainer now hides common background/system windows by default to reduce noise in the window picker.
+
 ### 2) Run mode
 
 Execute a saved workflow JSON.
