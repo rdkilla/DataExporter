@@ -38,21 +38,20 @@ python -m pip install -r requirements.txt
 
 ---
 
-## Quick test script
+## Quick test scripts
 
-For a one-command smoke test, run:
+Use the script that matches your platform:
 
-```bash
-run_test.bat
-```
+- **Windows:** `run_test.bat`
+- **Linux/macOS (config-only checks):** `run_test.sh`
 
-The batch script will:
+`run_test.bat` will:
 - create `configs/basic_test_config.json` if it does not exist,
 - create a local virtual environment in `.venv`,
 - install dependencies, and
 - run `python -m src check --config configs/basic_test_config.json`.
 
-Then you can edit that config and run trainer/runner on a Windows host.
+`run_test.sh` is intended for config-only checks on non-Windows hosts. GUI automation (`trainer`/`run` against real windows) and `package` are Windows-focused targets.
 
 ---
 
@@ -117,7 +116,7 @@ Useful options:
 - `--no-clean` keep PyInstaller cache.
 - `--pyinstaller-arg <arg>` pass through additional PyInstaller arguments (repeatable).
 
-### 4) Check mode
+### 5) Check mode
 
 Validate workflow configuration before running automation.
 
@@ -130,6 +129,11 @@ Optionally perform selector connectivity checks without executing actions:
 ```bash
 python -m src check --config configs/vendor_export.json --resolve-selectors
 ```
+
+#### What check mode validates
+
+- Confirms the JSON configuration shape and supported action definitions are valid.
+- With `--resolve-selectors`, also attempts optional selector resolution/connectivity checks without executing workflow actions.
 
 > For best compatibility with older targets (such as Windows 7), build on a Windows machine that closely matches the target environment.
 
@@ -253,6 +257,14 @@ Trainer/runner actions currently supported:
 5. Save config JSON (for example `configs/vendor_export.json`).
 6. Run the workflow with `python -m src run --config ...`.
 7. Verify the CSV file was created and is non-empty.
+
+### First successful run checklist
+
+1. Open the vendor application and navigate to the export screen.
+2. Run `python -m src trainer` and capture/test the required controls.
+3. Save a config JSON (for example `configs/vendor_export.json`).
+4. Run `python -m src check --config configs/vendor_export.json` (optionally add `--resolve-selectors`).
+5. Run `python -m src run --config configs/vendor_export.json` and verify CSV output.
 
 ---
 
