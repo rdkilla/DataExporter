@@ -7,16 +7,21 @@ from src.window_discovery import list_windows
 
 
 def run_trainer(backend: str = "win32") -> int:
-    windows = list_windows(backend=backend)
+    windows = list_windows(backend=backend, include_hidden=False)
+    if not windows:
+        windows = list_windows(backend=backend, include_hidden=True)
     if not windows:
         print("No windows found.")
         return 1
 
     print("\nOpen windows:\n")
+    if backend == "win32":
+        print("Tip: If controls look empty on Windows 11, retry with '--backend uia'.\n")
     for i, window in enumerate(windows):
         print(
             f"[{i}] title='{window['title']}' "
-            f"class='{window['class_name']}' handle='{window['handle']}'"
+            f"class='{window['class_name']}' handle='{window['handle']}' "
+            f"pid='{window['process_id']}' visible={window['visible']}"
         )
 
     try:
@@ -36,9 +41,12 @@ def run_trainer(backend: str = "win32") -> int:
         print("\nControls:\n")
         for i, control in enumerate(controls[:300]):
             info = control_to_dict(control)
+            display_name = info["name"] or "<no name>"
+            display_type = info["control_type"] or "<unknown>"
+            display_class = info["class_name"] or "<unknown>"
             print(
-                f"[{i}] Name='{info['name']}' | Type='{info['control_type']}' | "
-                f"Class='{info['class_name']}' | AutomationId='{info['automation_id']}' | "
+                f"[{i}] Name='{display_name}' | Type='{display_type}' | "
+                f"Class='{display_class}' | AutomationId='{info['automation_id']}' | "
                 f"Enabled={info['enabled']} Visible={info['visible']}"
             )
 
