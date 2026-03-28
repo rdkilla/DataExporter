@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from src.actions import SUPPORTED_ACTIONS, perform_action
@@ -9,87 +10,145 @@ from src.utils import ask_float, ask_int
 from src.window_discovery import list_windows
 
 
-def run_trainer(backend: str = "win32", theme: CliTheme | None = None) -> int:
-    ui = theme or build_theme()
-    ui.emit_banner("Interactive Trainer", f"Backend: {backend}")
+RESET = "\033[0m"
+STYLES = {
+    "heading": "\033[1;36m",
+    "success": "\033[1;32m",
+    "error": "\033[1;31m",
+    "hint": "\033[0;33m",
+    "row": "\033[0;37m",
+}
 
+
+def _should_use_color(no_color: bool) -> bool:
+    if no_color:
+        return False
+    return sys.stdout.isatty()
+
+
+def _style(text: str, tone: str, use_color: bool) -> str:
+    if not use_color:
+        return text
+    return f"{STYLES[tone]}{text}{RESET}"
+
+
+def print_heading(text: str, *, use_color: bool) -> None:
+    print(_style(f"\n{text}:\n", "heading", use_color))
+
+
+def print_row(text: str, *, use_color: bool) -> None:
+    print(_style(text, "row", use_color))
+
+
+def print_success(text: str, *, use_color: bool) -> None:
+    print(_style(text, "success", use_color))
+
+
+def print_error(text: str, *, use_color: bool) -> None:
+    print(_style(text, "error", use_color))
+
+
+def print_hint(text: str, *, use_color: bool) -> None:
+    print(_style(text, "hint", use_color))
+
+
+def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
+    use_color = _should_use_color(no_color)
     windows = list_windows(backend=backend, include_hidden=False)
     if not windows:
         windows = list_windows(backend=backend, include_hidden=True)
     if not windows:
-        ui.emit("No windows found.", "error")
+        print_error("No windows found.", use_color=use_color)
         return 1
 
-    ui.emit_section("Open windows")
+    print_heading("Open windows", use_color=use_color)
     if backend == "win32":
-        ui.emit(
-            "Tip: If controls look empty on Windows 11, retry with '--backend uia'.",
-            "muted",
-        )
+        print_hint("Tip: If controls look empty on Windows 11, retry with '--backend uia'.", use_color=use_color)
     for i, window in enumerate(windows):
-        window_summary = (
-            f"title='{window['title']}' class='{window['class_name']}' "
-            f"handle='{window['handle']}' pid='{window['process_id']}' "
-            f"visible={window['visible']}"
+        print_row(
+            f"[{i}] title='{window['title']}' "
+            f"class='{window['class_name']}' handle='{window['handle']}' "
+            f"pid='{window['process_id']}' visible={window['visible']}",
+            use_color=use_color,
         )
         ui.emit(f"{ui.status_pill(str(i), 'accent')} {window_summary}", "primary")
 
     try:
         selected_window = windows[ask_int(f"\n{ui.status_pill('SELECT', 'accent')} window number: ")]
     except Exception:
-        ui.emit("Invalid selection.", "error")
+        print_error("Invalid selection.", use_color=use_color)
         return 1
+    selected_window = windows[selected_index]
 
     wrapper = selected_window["wrapper"]
     controls = list_controls(wrapper)
     if not controls:
-        ui.emit("No controls found.", "error")
+        print_error("No controls found.", use_color=use_color)
         return 1
 
     workflow_steps = []
+    filter_text = ""
+    page_size = 25
+    page = 0
     while True:
-        ui.emit_section("Controls")
+        print_heading("Controls", use_color=use_color)
         for i, control in enumerate(controls[:300]):
             info = control_to_dict(control)
             display_name = info["name"] or "<no name>"
             display_type = info["control_type"] or "<unknown>"
             display_class = info["class_name"] or "<unknown>"
-            ui.emit(
-                f"{ui.status_pill(str(i), 'accent')} Name='{display_name}' | Type='{display_type}' | "
+            print_row(
+                f"[{i}] Name='{display_name}' | Type='{display_type}' | "
                 f"Class='{display_class}' | AutomationId='{info['automation_id']}' | "
                 f"Enabled={info['enabled']} Visible={info['visible']}",
-                "primary",
+                use_color=use_color,
             )
+            choice = input(
+                "\nSelect control index | commands: [n]ext [p]rev [f]ilter [d]etails [s]ave [q]uit: "
+            ).strip().lower()
+        else:
+            print("\nControls:\n")
+            for i, control in enumerate(controls[:300]):
+                info = control_to_dict(control)
+                display_name = info["name"] or "<no name>"
+                display_type = info["control_type"] or "<unknown>"
+                display_class = info["class_name"] or "<unknown>"
+                print(
+                    f"[{i}] Name='{display_name}' | Type='{display_type}' | "
+                    f"Class='{display_class}' | AutomationId='{info['automation_id']}' | "
+                    f"Enabled={info['enabled']} Visible={info['visible']}"
+                )
+            choice = input("\nSelect control index, or [s]ave/[q]uit: ").strip().lower()
 
-        choice = input(f"\n{ui.status_pill('INPUT', 'muted')} control index, or [s]ave/[q]uit: ").strip().lower()
         if choice == "q":
             ui.emit("Exiting trainer.", "muted")
             return 0
         if choice == "s":
-            return _save_workflow(backend, selected_window, workflow_steps, ui)
+            return _save_workflow(backend, selected_window, workflow_steps, use_color=use_color)
 
         try:
             control = controls[int(choice)]
+            selected_control_index = int(choice)
         except Exception:
-            ui.emit("Invalid control selection.", "error")
+            print_error("Invalid control selection.", use_color=use_color)
             continue
 
         control_meta = control_to_dict(control)
-        ui.emit_section("Control details")
+        print_heading("Control details", use_color=use_color)
         for key, value in control_meta.items():
-            ui.emit(ui.key_value_row(key, value, key_style="muted", value_style="primary"), "primary")
+            print_row(f"- {key}: {value}", use_color=use_color)
 
         ui.emit_section("Actions")
         for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
-            ui.emit(f"{ui.status_pill(str(idx), 'accent')} {action}", "primary")
+            print_row(f"{idx}. {action}", use_color=use_color)
 
-        raw_action = input(f"{ui.status_pill('INPUT', 'muted')} action number (blank to cancel): ").strip()
+        raw_action = input(f"{icons['pointer']} Choose action number (or blank to cancel): ").strip()
         if not raw_action:
             continue
         try:
             action = SUPPORTED_ACTIONS[int(raw_action) - 1]
         except Exception:
-            ui.emit("Invalid action.", "error")
+            print_error("Invalid action.", use_color=use_color)
             continue
 
         value = None
@@ -101,9 +160,9 @@ def run_trainer(backend: str = "win32", theme: CliTheme | None = None) -> int:
 
         try:
             result = perform_action(control, action, value)
-            ui.emit(f"Action completed: {result}", "success")
+            print_success(f"Action completed: {result}", use_color=use_color)
         except Exception as exc:
-            ui.emit(f"Action failed: {exc}", "error")
+            print_error(f"Action failed: {exc}", use_color=use_color)
             continue
 
         should_add = input(f"{ui.status_pill('INPUT', 'muted')} add action to workflow? [y/N]: ").strip().lower()
@@ -129,7 +188,7 @@ def run_trainer(backend: str = "win32", theme: CliTheme | None = None) -> int:
                     "framework_id": control_meta.get("framework_id"),
                     "process_id": control_meta.get("process_id"),
                     "title_regex": _make_title_regex(control_meta.get("name")),
-                    "found_index": int(choice),
+                    "found_index": selected_control_index,
                     "coordinates": control_meta.get("click_point"),
                 },
                 action=action,
@@ -143,12 +202,12 @@ def run_trainer(backend: str = "win32", theme: CliTheme | None = None) -> int:
                 },
             )
         )
-        ui.emit(f"Step saved in session. Total steps: {len(workflow_steps)}", "success")
+        print_success(f"Step saved in session. Total steps: {len(workflow_steps)}", use_color=use_color)
 
 
-def _save_workflow(backend: str, selected_window: dict, workflow_steps: list, ui: CliTheme) -> int:
+def _save_workflow(backend: str, selected_window: dict, workflow_steps: list, *, use_color: bool) -> int:
     if not workflow_steps:
-        ui.emit("No workflow steps collected. Nothing to save.", "muted")
+        print_error("No workflow steps collected. Nothing to save.", use_color=use_color)
         return 0
 
     output_dir = input(f"{ui.status_pill('INPUT', 'muted')} export output directory [exports]: ").strip() or "exports"
@@ -167,7 +226,7 @@ def _save_workflow(backend: str, selected_window: dict, workflow_steps: list, ui
     config["workflow"] = workflow_steps
 
     save_json(config_path, config, base_dir=Path.cwd())
-    ui.emit(f"Saved workflow to {config_path}", "success")
+    print_success(f"Saved workflow to {config_path}", use_color=use_color)
     return 0
 
 
@@ -178,3 +237,115 @@ def _make_title_regex(name: str | None) -> str | None:
     if not escaped:
         return None
     return f".*{escaped}.*"
+
+
+def _menu_icons() -> dict[str, str]:
+    fallback = {
+        "ok": "[OK]",
+        "warn": "[!]",
+        "error": "[X]",
+        "pointer": "->",
+    }
+    fancy = {
+        "ok": "✅",
+        "warn": "⚠️",
+        "error": "❌",
+        "pointer": "👉",
+    }
+    try:
+        "".join(fancy.values()).encode("utf-8")
+    except Exception:
+        return fallback
+    return fancy
+
+
+def _advanced_menu_available() -> bool:
+    encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
+    if "utf" not in encoding:
+        return False
+    return True
+
+
+def _prompt_pick_index(items: list, prompt: str, invalid_message: str) -> int | None:
+    try:
+        index = ask_int(prompt)
+        if index < 0 or index >= len(items):
+            print(invalid_message)
+            return None
+        return index
+    except Exception:
+        print(invalid_message)
+        return None
+
+
+def _print_window_menu(windows: list[dict]) -> None:
+    for i, window in enumerate(windows):
+        print(
+            f"[{i:>3}] "
+            f"title='{window['title']}' class='{window['class_name']}' "
+            f"handle='{window['handle']}' pid='{window['process_id']}' visible={window['visible']}"
+        )
+
+
+def _print_action_menu() -> None:
+    icons = _menu_icons()
+    print(f"\n{icons['pointer']} Action picker")
+    for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
+        print(f"[{idx:>2}] {action}")
+
+
+def _filter_controls(controls: list, filter_text: str) -> list[tuple[int, dict]]:
+    filtered = []
+    lowered_filter = filter_text.strip().lower()
+    for idx, control in enumerate(controls[:300]):
+        info = control_to_dict(control)
+        haystack = " ".join(
+            [
+                str(info.get("name", "")),
+                str(info.get("control_type", "")),
+                str(info.get("class_name", "")),
+                str(info.get("automation_id", "")),
+            ]
+        ).lower()
+        if lowered_filter and lowered_filter not in haystack:
+            continue
+        filtered.append((idx, info))
+    return filtered
+
+
+def _print_controls_menu(
+    filtered_controls: list[tuple[int, dict]],
+    page: int,
+    page_size: int,
+    filter_text: str,
+    max_items: int,
+) -> None:
+    icons = _menu_icons()
+    print(f"{icons['pointer']} Control picker")
+    if filter_text:
+        print(f"Filter: '{filter_text}'")
+    total = len(filtered_controls)
+    start = page * page_size
+    end = min(start + page_size, total)
+    print(f"Showing {start + 1 if total else 0}-{end} of {total} (max scanned: {max_items})")
+    print(f"{'Idx':>5}  {'Name':<30} {'Type':<16} {'Class':<24} {'E/V':<5}")
+    print("-" * 88)
+    if not filtered_controls:
+        print("(no controls match the current filter)")
+        return
+
+    for index, info in filtered_controls[start:end]:
+        display_name = _trim(info.get("name") or "<no name>", 30)
+        display_type = _trim(info.get("control_type") or "<unknown>", 16)
+        display_class = _trim(info.get("class_name") or "<unknown>", 24)
+        enabled = "Y" if info.get("enabled") else "N"
+        visible = "Y" if info.get("visible") else "N"
+        print(f"{index:>5}  {display_name:<30} {display_type:<16} {display_class:<24} {enabled}/{visible:<3}")
+
+
+def _trim(text: str, width: int) -> str:
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return text[:width]
+    return f"{text[: width - 1]}…"

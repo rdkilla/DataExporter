@@ -1,7 +1,29 @@
 import argparse
+import sys
 
 from src.cli_theme import build_theme
 from src.logging_setup import setup_logging
+
+
+TOOL_NAME = "Valve Export Tool"
+
+
+def _is_interactive() -> bool:
+    return sys.stdout.isatty() and sys.stdin.isatty()
+
+
+def _color(text: str, code: str, *, enabled: bool) -> str:
+    if not enabled:
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+def _print_startup_banner(command: str) -> None:
+    if not _is_interactive():
+        return
+
+    mode = command.upper()
+    print(f"{_color(TOOL_NAME, '1;36', enabled=True)} · mode: {mode}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="win32",
         choices=["win32", "uia"],
         help="pywinauto backend",
+    )
+    trainer_parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI color output in trainer mode",
     )
 
     run_parser = subparsers.add_parser("run", help="Run saved workflow")
@@ -146,12 +173,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     setup_logging()
     args = build_parser().parse_args()
-    theme = build_theme(args.theme)
+    _print_startup_banner(args.command)
 
     if args.command == "trainer":
         from src.trainer import run_trainer
 
-        return run_trainer(backend=args.backend, theme=theme)
+        return run_trainer(backend=args.backend, no_color=args.no_color)
 
     if args.command == "run":
         from src.runner import run_workflow
