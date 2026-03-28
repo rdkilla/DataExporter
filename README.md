@@ -38,21 +38,20 @@ python -m pip install -r requirements.txt
 
 ---
 
-## Quick test script
+## Quick test scripts
 
-For a one-command smoke test, run:
+Use the script that matches your platform:
 
-```bash
-run_test.bat
-```
+- **Windows:** `run_test.bat`
+- **Linux/macOS (config-only checks):** `run_test.sh`
 
-The batch script will:
+`run_test.bat` will:
 - create `configs/basic_test_config.json` if it does not exist,
 - create a local virtual environment in `.venv`,
 - install dependencies, and
 - run `python -m src check --config configs/basic_test_config.json`.
 
-Then you can edit that config and run trainer/runner on a Windows host.
+`run_test.sh` is intended for config-only checks on non-Windows hosts. GUI automation (`trainer`/`run` against real windows) and `package` are Windows-focused targets.
 
 ---
 
@@ -63,6 +62,25 @@ The entry point is:
 ```bash
 python -m src <command> [options]
 ```
+
+### Recommended first command: initialize a starter config
+
+Generate a starter workflow JSON from defaults:
+
+```bash
+python -m src init --config configs/vendor_export.json
+```
+
+Optional starter overrides:
+
+```bash
+python -m src init --config configs/vendor_export.json --backend uia --output-dir exports --schedule "every 4 hours" --timezone America/Chicago
+```
+
+After generation, the command prints recommended next steps for:
+- `check`
+- `trainer`
+- `run`
 
 ### 1) Trainer mode
 
@@ -101,7 +119,21 @@ python -m src daemon --config configs/vendor_export.json --state-file state/run_
 
 On startup, daemon mode inspects `state/run_history.json`, detects missed scheduling windows, and performs capped catch-up runs based on `export.max_missed_runs_to_catch_up`.
 
-### 4) Package mode
+### 4) Check mode
+
+Validate workflow configuration before running automation.
+
+```bash
+python -m src check --config configs/vendor_export.json
+```
+
+Optionally perform selector connectivity checks without executing actions:
+
+```bash
+python -m src check --config configs/vendor_export.json --resolve-selectors
+```
+
+### 5) Package mode
 
 Build a distributable executable with PyInstaller.
 
@@ -123,7 +155,7 @@ Artifact location by package mode:
 
 ### 4) Check mode
 
-Validate workflow configuration before running automation.
+Validate workflow plus runtime configuration before running automation (app backend, export scheduling/timezone/quiet-hours, and alerts settings).
 
 ```bash
 python -m src check --config configs/vendor_export.json
@@ -134,6 +166,11 @@ Optionally perform selector connectivity checks without executing actions:
 ```bash
 python -m src check --config configs/vendor_export.json --resolve-selectors
 ```
+
+#### What check mode validates
+
+- Confirms the JSON configuration shape and supported action definitions are valid.
+- With `--resolve-selectors`, also attempts optional selector resolution/connectivity checks without executing workflow actions.
 
 > For best compatibility with older targets (such as Windows 7), build on a Windows machine that closely matches the target environment.
 
@@ -250,13 +287,22 @@ Trainer/runner actions currently supported:
 
 ## Typical usage flow
 
-1. Launch the vendor application manually.
-2. Run trainer mode and select the correct window.
-3. Test actions on relevant controls.
-4. Add successful actions to the workflow (for filename entry steps, you can use macros like `"{output_file}"` or `"Report_{now:%Y%m%d}.csv"` as the action value).
-5. Save config JSON (for example `configs/vendor_export.json`).
-6. Run the workflow with `python -m src run --config ...`.
-7. Verify the CSV file was created and is non-empty.
+1. Generate a starter config: `python -m src init --config configs/vendor_export.json`.
+2. Launch the vendor application manually.
+3. Run trainer mode and select the correct window.
+4. Test actions on relevant controls.
+5. Add successful actions to the workflow (for filename entry steps, you can use macros like `"{output_file}"` or `"Report_{now:%Y%m%d}.csv"` as the action value).
+6. Save config JSON updates (for example `configs/vendor_export.json`).
+7. Run the workflow with `python -m src run --config ...`.
+8. Verify the CSV file was created and is non-empty.
+
+### First successful run checklist
+
+1. Open the vendor application and navigate to the export screen.
+2. Run `python -m src trainer` and capture/test the required controls.
+3. Save a config JSON (for example `configs/vendor_export.json`).
+4. Run `python -m src check --config configs/vendor_export.json` (optionally add `--resolve-selectors`).
+5. Run `python -m src run --config configs/vendor_export.json` and verify CSV output.
 
 ---
 

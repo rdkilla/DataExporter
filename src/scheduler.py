@@ -8,8 +8,6 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from src.runner import run_workflow_with_metadata
-
 _INTERVAL_RE = re.compile(r"^(?P<value>\d+)\s*(?P<unit>[smhd]|seconds?|minutes?|hours?|days?)$", re.IGNORECASE)
 
 
@@ -49,6 +47,8 @@ class SchedulePolicy:
 
         quiet = _parse_quiet_hours(export_cfg.get("quiet_hours"))
         max_missed = int(export_cfg.get("max_missed_runs_to_catch_up", 0))
+        if max_missed < 0:
+            raise ValueError("export.max_missed_runs_to_catch_up must be >= 0")
 
         if isinstance(schedule, dict):
             if "cron" in schedule:
@@ -184,6 +184,8 @@ def run_daemon(config_path: str, state_path: str = "state/run_history.json") -> 
 
 
 def _execute_and_persist(config_path: str, state_path: str, planned_time: datetime, catch_up: bool) -> None:
+    from src.runner import run_workflow_with_metadata
+
     started_at = datetime.now(timezone.utc)
     result = run_workflow_with_metadata(config_path)
     completed_at = datetime.now(timezone.utc)
