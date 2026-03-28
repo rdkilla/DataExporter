@@ -75,7 +75,13 @@ if not exist "!CONFIG_PATH!" (
 )
 
 if not exist "!ROOT_DIR!\.venv\Scripts\python.exe" (
-  py -3 -m venv "!ROOT_DIR!\.venv" || python -m venv "!ROOT_DIR!\.venv"
+  where py >nul 2>&1
+  if !errorlevel! == 0 (
+    py -3 -m venv "!ROOT_DIR!\.venv"
+  ) else (
+    python -m venv "!ROOT_DIR!\.venv"
+  )
+  if errorlevel 1 goto :error
 )
 
 call "!ROOT_DIR!\.venv\Scripts\activate.bat"
