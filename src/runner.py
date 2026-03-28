@@ -10,6 +10,7 @@ from typing import Any
 from src.actions import perform_action
 from src.config_io import load_json
 from src.config_validation import validate_config
+from src.path_safety import resolve_base_dir, resolve_write_path
 from src.utils import make_output_file
 
 _ALERT_STATE_FILE = ".data_exporter_alert_state.json"
@@ -263,8 +264,9 @@ def _save_alert_state(output_path: Path, state: dict) -> None:
     state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def _emit_alert(alerts_cfg: dict, *, alert_kind: str, message: str, metadata: dict | None = None, event_type: str = "error") -> None:
-    output_path = Path(alerts_cfg.get("output_path") or "alerts")
+def _emit_alert(
+    output_path: Path, *, alert_kind: str, message: str, metadata: dict | None = None, event_type: str = "error"
+) -> None:
     try:
         alert_file = _write_alert_file(output_path, alert_kind=alert_kind, message=message, metadata=metadata)
         logging.error("ALERT emitted (%s): %s | file=%s", alert_kind, message, alert_file)
@@ -302,12 +304,14 @@ def _run_workflow_cfg(cfg: dict, *, dry_run: bool = False) -> tuple[int, str | N
     app_cfg = cfg.get("app", {})
     export_cfg = cfg.get("export", {})
     workflow = cfg.get("workflow", [])
+    path_base_dir = resolve_base_dir(cfg.get("_path_base_dir"))
 
     output_file = make_output_file(
         output_dir=export_cfg.get("output_dir", "exports"),
         prefix=export_cfg.get("prefix", "valves"),
         include_timestamp_utc=bool(export_cfg.get("include_timestamp_utc", True)),
         include_run_id=bool(export_cfg.get("include_run_id", True)),
+        base_dir=path_base_dir,
     )
 
     started_at_utc = _utc_now_iso()
@@ -473,7 +477,12 @@ def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
     if not alerts_cfg.get("enabled", False):
         return
 
-    output_path = Path(alerts_cfg.get("output_path") or "alerts")
+    path_base_dir = resolve_base_dir(cfg.get("_path_base_dir"))
+    output_path = resolve_write_path(
+        alerts_cfg.get("output_path") or "alerts",
+        base_dir=path_base_dir,
+        reject_symlink_traversal=True,
+    )
     failure_threshold = max(int(alerts_cfg.get("failure_threshold", 3)), 1)
     sla_hours = float(alerts_cfg.get("sla_hours", 24))
 
@@ -500,7 +509,7 @@ def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
         already_sent_for = int(state.get("failure_alert_sent_for", 0))
         if consecutive_failures >= failure_threshold and already_sent_for < failure_threshold:
             _emit_alert(
-                alerts_cfg,
+                output_path,
                 alert_kind="failure_threshold",
                 message=(
                     f"Workflow has failed {consecutive_failures} consecutive run(s), "
@@ -520,7 +529,7 @@ def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
             deadline = reference_dt + timedelta(hours=sla_hours)
             if now >= deadline and not stale_active:
                 _emit_alert(
-                    alerts_cfg,
+                    output_path,
                     alert_kind="stale_data",
                     message="No successful run observed within SLA window " f"({sla_hours:g} hours).",
                     metadata={
@@ -536,9 +545,12 @@ def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
     _save_alert_state(output_path, state)
 
 
-def check_workflow(config_path: str, *, resolve_selectors: bool = False) -> int:
+def check_workflow(
+    config_path: str, *, resolve_selectors: bool = False, path_base_dir: str | Path | None = None
+) -> int:
     cfg = load_json(config_path)
-    errors = validate_config(cfg)
+    cfg["_path_base_dir"] = str(resolve_base_dir(path_base_dir or Path(config_path).resolve().parent))
+    errors = validate_config(cfg, base_dir=cfg["_path_base_dir"])
     if errors:
         for err in errors:
             logging.error("Config validation error: %s", err)
@@ -552,9 +564,10 @@ def check_workflow(config_path: str, *, resolve_selectors: bool = False) -> int:
     return _run_workflow_cfg(cfg, dry_run=True)[0]
 
 
-def run_workflow(config_path: str, dry_run: bool = False) -> int:
+def run_workflow(config_path: str, dry_run: bool = False, path_base_dir: str | Path | None = None) -> int:
     cfg = load_json(config_path)
-    errors = validate_config(cfg)
+    cfg["_path_base_dir"] = str(resolve_base_dir(path_base_dir or Path(config_path).resolve().parent))
+    errors = validate_config(cfg, base_dir=cfg["_path_base_dir"])
     if errors:
         for err in errors:
             logging.error("Config validation error: %s", err)
@@ -566,9 +579,10 @@ def run_workflow(config_path: str, dry_run: bool = False) -> int:
     return status
 
 
-def run_workflow_with_metadata(config_path: str) -> dict[str, Any]:
+def run_workflow_with_metadata(config_path: str, *, path_base_dir: str | Path | None = None) -> dict[str, Any]:
     cfg = load_json(config_path)
-    errors = validate_config(cfg)
+    cfg["_path_base_dir"] = str(resolve_base_dir(path_base_dir or Path(config_path).resolve().parent))
+    errors = validate_config(cfg, base_dir=cfg["_path_base_dir"])
     if errors:
         for err in errors:
             logging.error("Config validation error: %s", err)
