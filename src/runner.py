@@ -375,7 +375,13 @@ def _run_workflow_cfg(cfg: dict, *, dry_run: bool = False) -> tuple[int, str | N
                             logging.warning("Dry-run read_text capture failed: %s | error=%s", step_name, exc)
                             print(f"[DRY-RUN] read_text capture failed for '{step_name}': {exc}")
                 else:
-                    result = perform_action(control, action, value)
+                    result = perform_action(
+                        control,
+                        action,
+                        value,
+                        security_config=cfg.get("security"),
+                        expected_window=step_window,
+                    )
                     if delay_after > 0:
                         time.sleep(delay_after)
                     logging.info("Step succeeded: %s | %s", step_name, result)

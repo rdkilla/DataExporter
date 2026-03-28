@@ -7,6 +7,13 @@ REQUIRED_TOP_LEVEL_KEYS = ("app", "export", "workflow")
 REQUIRED_STEP_KEYS = ("name", "control", "action")
 ACTIONS_REQUIRING_VALUE = {"set_text", "type_keys", "send_keys"}
 SUPPORTED_BACKENDS = {"win32", "uia"}
+SECURITY_BOOL_FIELDS = {
+    "allow_global_send_keys",
+    "interactive_confirmation_required",
+    "require_focused_window_for_keyboard_input",
+    "allow_unfocused_window_keyboard_input",
+    "allow_dangerous_key_chords",
+}
 
 
 def validate_config(config: dict) -> list[str]:
@@ -86,6 +93,25 @@ def validate_config(config: dict) -> list[str]:
             output_path = alerts.get("output_path")
             if output_path is not None and (not isinstance(output_path, str) or not output_path.strip()):
                 errors.append("'alerts.output_path' must be a non-empty string when provided.")
+
+    security = config.get("security")
+    if security is not None:
+        if not isinstance(security, dict):
+            errors.append("'security' must be an object when provided.")
+        else:
+            for field in SECURITY_BOOL_FIELDS:
+                value = security.get(field)
+                if value is not None and not isinstance(value, bool):
+                    errors.append(f"'security.{field}' must be a boolean when provided.")
+
+            denylist = security.get("dangerous_key_chords_denylist")
+            if denylist is not None:
+                if not isinstance(denylist, list):
+                    errors.append("'security.dangerous_key_chords_denylist' must be a list of strings.")
+                elif not all(isinstance(item, str) and item.strip() for item in denylist):
+                    errors.append(
+                        "'security.dangerous_key_chords_denylist' must contain only non-empty strings."
+                    )
 
     workflow = config.get("workflow")
     if not isinstance(workflow, list):
