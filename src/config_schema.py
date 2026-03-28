@@ -4,6 +4,10 @@ def make_base_config(backend: str, window_title_regex: str, exe_path: str | None
             "backend": backend,
             "window_title_regex": window_title_regex,
             "exe_path": exe_path,
+            "allowed_exe_roots": None,
+            "allowed_exe_names": None,
+            "allow_network_exe": False,
+            "exe_sha256": None,
         },
         "export": {
             "output_dir": output_dir,

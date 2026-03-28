@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import ntpath
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -61,12 +62,82 @@ def _write_manifest(start_ts: str, manifest: dict) -> None:
 def _connect_window(app_cfg: dict):
     from pywinauto import Application, Desktop
 
+    def _canonical_path(value: str) -> str:
+        normalized = ntpath.normpath(value.replace("/", "\\"))
+        return ntpath.normcase(normalized)
+
+    def _is_unc_path(value: str) -> bool:
+        candidate = value.replace("/", "\\")
+        return candidate.startswith("\\\\")
+
+    def _is_normalized_path(value: str) -> bool:
+        if "/" in value and "\\" in value:
+            return False
+        candidate = value.replace("/", "\\")
+        parts = [segment for segment in candidate.split("\\") if segment]
+        if "." in parts or ".." in parts:
+            return False
+        return ntpath.normpath(candidate) == candidate.rstrip("\\") or candidate.endswith(":\\")
+
+    def _is_under_allowed_root(path: str, root: str) -> bool:
+        canonical_path = _canonical_path(path)
+        canonical_root = _canonical_path(root)
+        if canonical_path == canonical_root:
+            return True
+        return canonical_path.startswith(canonical_root.rstrip("\\") + "\\")
+
+    def _validate_exe_launch_policy(path: Path, cfg: dict) -> str | None:
+        path_text = str(path)
+
+        if not path.is_absolute():
+            return "Executable path must be absolute."
+
+        if not _is_normalized_path(path_text):
+            return "Executable path must be normalized before launch."
+
+        allow_network_exe = bool(cfg.get("allow_network_exe", False))
+        if _is_unc_path(path_text) and not allow_network_exe:
+            return "UNC/network executable paths are blocked by policy unless 'app.allow_network_exe' is true."
+
+        allowed_roots = cfg.get("allowed_exe_roots")
+        if not isinstance(allowed_roots, list) or not allowed_roots:
+            return "Execution policy requires 'app.allowed_exe_roots' when 'app.exe_path' is set."
+
+        if not any(isinstance(root, str) and _is_under_allowed_root(path_text, root) for root in allowed_roots):
+            return "Executable path is outside configured 'app.allowed_exe_roots'."
+
+        allowed_names = cfg.get("allowed_exe_names")
+        if isinstance(allowed_names, list) and allowed_names:
+            exe_name = path.name.lower()
+            normalized_names = {str(name).strip().lower() for name in allowed_names if isinstance(name, str)}
+            if exe_name not in normalized_names:
+                return "Executable file name is not listed in 'app.allowed_exe_names'."
+
+        expected_sha256 = cfg.get("exe_sha256")
+        if expected_sha256:
+            actual_sha256 = _file_sha256(path).lower()
+            if actual_sha256 != str(expected_sha256).strip().lower():
+                return "Executable SHA-256 does not match configured 'app.exe_sha256'."
+
+        return None
+
     backend = app_cfg.get("backend", "win32")
     title_re = app_cfg.get("window_title_regex", ".*")
     exe_path = app_cfg.get("exe_path")
     launch_if_needed = bool(app_cfg.get("launch_if_needed", True))
 
-    if launch_if_needed and exe_path and Path(exe_path).exists():
+    if launch_if_needed and exe_path:
+        exe_file = Path(exe_path)
+        if not exe_file.exists():
+            message = f"Configured executable does not exist: {exe_file}"
+            logging.error(message)
+            raise RuntimeError(message)
+
+        policy_error = _validate_exe_launch_policy(exe_file, app_cfg)
+        if policy_error:
+            logging.error("Execution policy validation failed for '%s': %s", exe_file, policy_error)
+            raise RuntimeError(policy_error)
+
         try:
             app = Application(backend=backend).start(exe_path)
             time.sleep(2)

@@ -1,12 +1,42 @@
 from src.actions import SUPPORTED_ACTIONS
 from src.scheduler import SchedulePolicy
 from zoneinfo import ZoneInfo
+import ntpath
+import re
 
 
 REQUIRED_TOP_LEVEL_KEYS = ("app", "export", "workflow")
 REQUIRED_STEP_KEYS = ("name", "control", "action")
 ACTIONS_REQUIRING_VALUE = {"set_text", "type_keys", "send_keys"}
 SUPPORTED_BACKENDS = {"win32", "uia"}
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _is_absolute_path(value: str) -> bool:
+    return bool(ntpath.isabs(value) or value.startswith("/"))
+
+
+def _canonical_path(value: str) -> str:
+    normalized = ntpath.normpath(value.replace("/", "\\"))
+    return ntpath.normcase(normalized)
+
+
+def _is_normalized_path(value: str) -> bool:
+    if "/" in value and "\\" in value:
+        return False
+    candidate = value.replace("/", "\\")
+    parts = [segment for segment in candidate.split("\\") if segment]
+    if "." in parts or ".." in parts:
+        return False
+    return ntpath.normpath(candidate) == candidate.rstrip("\\") or candidate.endswith(":\\")
+
+
+def _is_under_allowed_root(path: str, root: str) -> bool:
+    canonical_path = _canonical_path(path)
+    canonical_root = _canonical_path(root)
+    if canonical_path == canonical_root:
+        return True
+    return canonical_path.startswith(canonical_root.rstrip("\\") + "\\")
 
 
 def validate_config(config: dict) -> list[str]:
@@ -32,6 +62,63 @@ def validate_config(config: dict) -> list[str]:
             optional_value = app.get(optional_field)
             if optional_value is not None and not isinstance(optional_value, str):
                 errors.append(f"'app.{optional_field}' must be a string when provided.")
+
+        allowed_exe_roots = app.get("allowed_exe_roots")
+        if allowed_exe_roots is not None:
+            if not isinstance(allowed_exe_roots, list) or not allowed_exe_roots:
+                errors.append("'app.allowed_exe_roots' must be a non-empty list of absolute directories when provided.")
+            else:
+                for index, root in enumerate(allowed_exe_roots):
+                    if not isinstance(root, str) or not root.strip():
+                        errors.append(f"'app.allowed_exe_roots[{index}]' must be a non-empty string.")
+                        continue
+                    if not _is_absolute_path(root):
+                        errors.append(f"'app.allowed_exe_roots[{index}]' must be an absolute directory path.")
+                    if not _is_normalized_path(root):
+                        errors.append(
+                            f"'app.allowed_exe_roots[{index}]' must be normalized (no '.', '..', or mixed separators)."
+                        )
+
+        allowed_exe_names = app.get("allowed_exe_names")
+        if allowed_exe_names is not None:
+            if not isinstance(allowed_exe_names, list) or not allowed_exe_names:
+                errors.append("'app.allowed_exe_names' must be a non-empty list when provided.")
+            else:
+                for index, exe_name in enumerate(allowed_exe_names):
+                    if not isinstance(exe_name, str) or not exe_name.strip():
+                        errors.append(f"'app.allowed_exe_names[{index}]' must be a non-empty string.")
+
+        allow_network_exe = app.get("allow_network_exe")
+        if allow_network_exe is not None and not isinstance(allow_network_exe, bool):
+            errors.append("'app.allow_network_exe' must be a boolean when provided.")
+
+        exe_sha256 = app.get("exe_sha256")
+        if exe_sha256 is not None:
+            if not isinstance(exe_sha256, str) or not exe_sha256.strip():
+                errors.append("'app.exe_sha256' must be a non-empty SHA-256 hex string when provided.")
+            elif not _SHA256_RE.fullmatch(exe_sha256.strip()):
+                errors.append("'app.exe_sha256' must be a valid 64-character SHA-256 hex string.")
+
+        exe_path = app.get("exe_path")
+        if isinstance(exe_path, str) and exe_path.strip():
+            if not _is_absolute_path(exe_path):
+                errors.append("'app.exe_path' must be an absolute path.")
+            if not _is_normalized_path(exe_path):
+                errors.append("'app.exe_path' must be normalized (no '.', '..', or mixed separators).")
+
+            if allowed_exe_roots is None:
+                errors.append(
+                    "'app.allowed_exe_roots' is required when 'app.exe_path' is provided (fail-closed execution policy)."
+                )
+            elif isinstance(allowed_exe_roots, list) and allowed_exe_roots:
+                if not any(_is_under_allowed_root(exe_path, root) for root in allowed_exe_roots if isinstance(root, str)):
+                    errors.append("'app.exe_path' must be under one of 'app.allowed_exe_roots'.")
+
+            if isinstance(allowed_exe_names, list) and allowed_exe_names:
+                exe_name = ntpath.basename(exe_path).lower()
+                allowed = {str(name).strip().lower() for name in allowed_exe_names if isinstance(name, str)}
+                if exe_name not in allowed:
+                    errors.append("'app.exe_path' filename is not included in 'app.allowed_exe_names'.")
 
     export = config.get("export")
     if not isinstance(export, dict):
