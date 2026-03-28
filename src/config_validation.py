@@ -1,8 +1,11 @@
-from src.actions import SUPPORTED_ACTIONS
-from src.scheduler import SchedulePolicy
+from pathlib import Path
 from zoneinfo import ZoneInfo
 import ntpath
 import re
+
+from src.actions import SUPPORTED_ACTIONS
+from src.path_safety import PathSafetyError, resolve_base_dir, resolve_write_path
+from src.scheduler import SchedulePolicy
 
 
 REQUIRED_TOP_LEVEL_KEYS = ("app", "export", "workflow")
@@ -39,8 +42,9 @@ def _is_under_allowed_root(path: str, root: str) -> bool:
     return canonical_path.startswith(canonical_root.rstrip("\\") + "\\")
 
 
-def validate_config(config: dict) -> list[str]:
+def validate_config(config: dict, *, base_dir: str | Path | None = None) -> list[str]:
     errors: list[str] = []
+    approved_base = resolve_base_dir(base_dir)
 
     if not isinstance(config, dict):
         return ["Configuration root must be a JSON object."]
@@ -127,6 +131,11 @@ def validate_config(config: dict) -> list[str]:
         output_dir = export.get("output_dir")
         if not isinstance(output_dir, str) or not output_dir.strip():
             errors.append("'export.output_dir' must be a non-empty string.")
+        else:
+            try:
+                resolve_write_path(output_dir, base_dir=approved_base, reject_symlink_traversal=True)
+            except PathSafetyError as exc:
+                errors.append(f"'export.output_dir' is not writable within approved base '{approved_base}': {exc}")
 
         has_schedule = "schedule" in export
         if not has_schedule:
@@ -173,6 +182,13 @@ def validate_config(config: dict) -> list[str]:
             output_path = alerts.get("output_path")
             if output_path is not None and (not isinstance(output_path, str) or not output_path.strip()):
                 errors.append("'alerts.output_path' must be a non-empty string when provided.")
+            elif isinstance(output_path, str):
+                try:
+                    resolve_write_path(output_path, base_dir=approved_base, reject_symlink_traversal=True)
+                except PathSafetyError as exc:
+                    errors.append(
+                        f"'alerts.output_path' is not writable within approved base '{approved_base}': {exc}"
+                    )
 
     workflow = config.get("workflow")
     if not isinstance(workflow, list):

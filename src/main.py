@@ -26,6 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate workflow control resolution without performing UI actions",
     )
+    run_parser.add_argument(
+        "--path-base-dir",
+        default=None,
+        help="Approved base directory for workflow output writes (default: config file directory)",
+    )
 
     daemon_parser = subparsers.add_parser("daemon", help="Run scheduled daemon")
     daemon_parser.add_argument(
@@ -38,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="state/run_history.json",
         help="Path to scheduler state history JSON",
     )
+    daemon_parser.add_argument(
+        "--path-base-dir",
+        default=None,
+        help="Approved base directory for workflow output writes (default: config file directory)",
+    )
 
     check_parser = subparsers.add_parser("check", help="Validate workflow config")
     check_parser.add_argument(
@@ -49,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--resolve-selectors",
         action="store_true",
         help="Try to resolve window/control selectors without performing actions",
+    )
+    check_parser.add_argument(
+        "--path-base-dir",
+        default=None,
+        help="Approved base directory for output path validation (default: config file directory)",
     )
 
     init_parser = subparsers.add_parser("init", help="Generate a starter workflow config")
@@ -132,17 +147,21 @@ def main() -> int:
     if args.command == "run":
         from src.runner import run_workflow
 
-        return run_workflow(args.config, dry_run=args.dry_run)
+        return run_workflow(args.config, dry_run=args.dry_run, path_base_dir=args.path_base_dir)
 
     if args.command == "daemon":
         from src.scheduler import run_daemon
 
-        return run_daemon(args.config, state_path=args.state_file)
+        return run_daemon(args.config, state_path=args.state_file, path_base_dir=args.path_base_dir)
 
     if args.command == "check":
         from src.runner import check_workflow
 
-        return check_workflow(args.config, resolve_selectors=args.resolve_selectors)
+        return check_workflow(
+            args.config,
+            resolve_selectors=args.resolve_selectors,
+            path_base_dir=args.path_base_dir,
+        )
 
     if args.command == "init":
         from src.init_config import init_config

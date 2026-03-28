@@ -149,7 +149,11 @@ class SchedulePolicy:
         return self.next_run_after(next_allowed - timedelta(seconds=1))
 
 
-def run_daemon(config_path: str, state_path: str = "state/run_history.json") -> int:
+def run_daemon(
+    config_path: str,
+    state_path: str = "state/run_history.json",
+    path_base_dir: str | Path | None = None,
+) -> int:
     from src.config_io import load_json
 
     cfg = load_json(config_path)
@@ -166,7 +170,13 @@ def run_daemon(config_path: str, state_path: str = "state/run_history.json") -> 
             logging.info("Catch-up scan found %s missed run(s)", len(missed_runs))
         for missed in missed_runs:
             logging.info("Executing catch-up run for planned_time=%s", missed.isoformat())
-            _execute_and_persist(config_path, state_path, planned_time=missed, catch_up=True)
+            _execute_and_persist(
+                config_path,
+                state_path,
+                planned_time=missed,
+                catch_up=True,
+                path_base_dir=path_base_dir,
+            )
 
     while True:
         current = policy.now()
@@ -180,14 +190,26 @@ def run_daemon(config_path: str, state_path: str = "state/run_history.json") -> 
         )
 
         _sleep_until(next_run, policy)
-        _execute_and_persist(config_path, state_path, planned_time=next_run, catch_up=False)
+        _execute_and_persist(
+            config_path,
+            state_path,
+            planned_time=next_run,
+            catch_up=False,
+            path_base_dir=path_base_dir,
+        )
 
 
-def _execute_and_persist(config_path: str, state_path: str, planned_time: datetime, catch_up: bool) -> None:
+def _execute_and_persist(
+    config_path: str,
+    state_path: str,
+    planned_time: datetime,
+    catch_up: bool,
+    path_base_dir: str | Path | None = None,
+) -> None:
     from src.runner import run_workflow_with_metadata
 
     started_at = datetime.now(timezone.utc)
-    result = run_workflow_with_metadata(config_path)
+    result = run_workflow_with_metadata(config_path, path_base_dir=path_base_dir)
     completed_at = datetime.now(timezone.utc)
 
     record = {
