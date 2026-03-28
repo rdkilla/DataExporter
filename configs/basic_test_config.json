@@ -1,0 +1,56 @@
+{
+  "app": {
+    "backend": "win32",
+    "window_title_regex": ".*Vendor App.*",
+    "exe_path": "C:\\Program Files\\Vendor\\App.exe"
+  },
+  "export": {
+    "output_dir": "test_exports",
+    "schedule": "every 6 hours",
+    "timezone": "America/Chicago",
+    "max_missed_runs_to_catch_up": 1,
+    "quiet_hours": {
+      "start": "22:00",
+      "end": "06:00"
+    }
+  },
+  "alerts": {
+    "enabled": false,
+    "failure_threshold": 3,
+    "sla_hours": 24,
+    "output_path": "test_alerts"
+  },
+  "workflow": [
+    {
+      "name": "focus_export_button",
+      "window": {
+        "title": "Vendor App"
+      },
+      "control": {
+        "name": "Export",
+        "control_type": "Button",
+        "class_name": "Button",
+        "automation_id": "btnExport"
+      },
+      "action": "click_input",
+      "delay_after": 1.0,
+      "retries": 1
+    },
+    {
+      "name": "enter_output_path",
+      "window": {
+        "title": "Vendor App"
+      },
+      "control": {
+        "name": "File name",
+        "control_type": "Edit",
+        "class_name": "Edit",
+        "automation_id": "txtPath"
+      },
+      "action": "set_text",
+      "value": "{output_file}",
+      "delay_after": 0.5,
+      "retries": 2
+    }
+  ]
+}
