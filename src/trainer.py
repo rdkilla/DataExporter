@@ -76,6 +76,7 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
     except Exception:
         print_error("Invalid selection.", use_color=use_color)
         return 1
+    selected_window = windows[selected_index]
 
     wrapper = selected_window["wrapper"]
     controls = list_controls(wrapper)
@@ -84,6 +85,9 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
         return 1
 
     workflow_steps = []
+    filter_text = ""
+    page_size = 25
+    page = 0
     while True:
         print_heading("Controls", use_color=use_color)
         for i, control in enumerate(controls[:300]):
@@ -97,8 +101,23 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
                 f"Enabled={info['enabled']} Visible={info['visible']}",
                 use_color=use_color,
             )
+            choice = input(
+                "\nSelect control index | commands: [n]ext [p]rev [f]ilter [d]etails [s]ave [q]uit: "
+            ).strip().lower()
+        else:
+            print("\nControls:\n")
+            for i, control in enumerate(controls[:300]):
+                info = control_to_dict(control)
+                display_name = info["name"] or "<no name>"
+                display_type = info["control_type"] or "<unknown>"
+                display_class = info["class_name"] or "<unknown>"
+                print(
+                    f"[{i}] Name='{display_name}' | Type='{display_type}' | "
+                    f"Class='{display_class}' | AutomationId='{info['automation_id']}' | "
+                    f"Enabled={info['enabled']} Visible={info['visible']}"
+                )
+            choice = input("\nSelect control index, or [s]ave/[q]uit: ").strip().lower()
 
-        choice = input("\nSelect control index, or [s]ave/[q]uit: ").strip().lower()
         if choice == "q":
             return 0
         if choice == "s":
@@ -106,6 +125,7 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
 
         try:
             control = controls[int(choice)]
+            selected_control_index = int(choice)
         except Exception:
             print_error("Invalid control selection.", use_color=use_color)
             continue
@@ -118,7 +138,7 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
         for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
             print_row(f"{idx}. {action}", use_color=use_color)
 
-        raw_action = input("Choose action number (or blank to cancel): ").strip()
+        raw_action = input(f"{icons['pointer']} Choose action number (or blank to cancel): ").strip()
         if not raw_action:
             continue
         try:
@@ -160,7 +180,7 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
                     "framework_id": control_meta.get("framework_id"),
                     "process_id": control_meta.get("process_id"),
                     "title_regex": _make_title_regex(control_meta.get("name")),
-                    "found_index": int(choice),
+                    "found_index": selected_control_index,
                     "coordinates": control_meta.get("click_point"),
                 },
                 action=action,
@@ -206,3 +226,115 @@ def _make_title_regex(name: str | None) -> str | None:
     if not escaped:
         return None
     return f".*{escaped}.*"
+
+
+def _menu_icons() -> dict[str, str]:
+    fallback = {
+        "ok": "[OK]",
+        "warn": "[!]",
+        "error": "[X]",
+        "pointer": "->",
+    }
+    fancy = {
+        "ok": "✅",
+        "warn": "⚠️",
+        "error": "❌",
+        "pointer": "👉",
+    }
+    try:
+        "".join(fancy.values()).encode("utf-8")
+    except Exception:
+        return fallback
+    return fancy
+
+
+def _advanced_menu_available() -> bool:
+    encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
+    if "utf" not in encoding:
+        return False
+    return True
+
+
+def _prompt_pick_index(items: list, prompt: str, invalid_message: str) -> int | None:
+    try:
+        index = ask_int(prompt)
+        if index < 0 or index >= len(items):
+            print(invalid_message)
+            return None
+        return index
+    except Exception:
+        print(invalid_message)
+        return None
+
+
+def _print_window_menu(windows: list[dict]) -> None:
+    for i, window in enumerate(windows):
+        print(
+            f"[{i:>3}] "
+            f"title='{window['title']}' class='{window['class_name']}' "
+            f"handle='{window['handle']}' pid='{window['process_id']}' visible={window['visible']}"
+        )
+
+
+def _print_action_menu() -> None:
+    icons = _menu_icons()
+    print(f"\n{icons['pointer']} Action picker")
+    for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
+        print(f"[{idx:>2}] {action}")
+
+
+def _filter_controls(controls: list, filter_text: str) -> list[tuple[int, dict]]:
+    filtered = []
+    lowered_filter = filter_text.strip().lower()
+    for idx, control in enumerate(controls[:300]):
+        info = control_to_dict(control)
+        haystack = " ".join(
+            [
+                str(info.get("name", "")),
+                str(info.get("control_type", "")),
+                str(info.get("class_name", "")),
+                str(info.get("automation_id", "")),
+            ]
+        ).lower()
+        if lowered_filter and lowered_filter not in haystack:
+            continue
+        filtered.append((idx, info))
+    return filtered
+
+
+def _print_controls_menu(
+    filtered_controls: list[tuple[int, dict]],
+    page: int,
+    page_size: int,
+    filter_text: str,
+    max_items: int,
+) -> None:
+    icons = _menu_icons()
+    print(f"{icons['pointer']} Control picker")
+    if filter_text:
+        print(f"Filter: '{filter_text}'")
+    total = len(filtered_controls)
+    start = page * page_size
+    end = min(start + page_size, total)
+    print(f"Showing {start + 1 if total else 0}-{end} of {total} (max scanned: {max_items})")
+    print(f"{'Idx':>5}  {'Name':<30} {'Type':<16} {'Class':<24} {'E/V':<5}")
+    print("-" * 88)
+    if not filtered_controls:
+        print("(no controls match the current filter)")
+        return
+
+    for index, info in filtered_controls[start:end]:
+        display_name = _trim(info.get("name") or "<no name>", 30)
+        display_type = _trim(info.get("control_type") or "<unknown>", 16)
+        display_class = _trim(info.get("class_name") or "<unknown>", 24)
+        enabled = "Y" if info.get("enabled") else "N"
+        visible = "Y" if info.get("visible") else "N"
+        print(f"{index:>5}  {display_name:<30} {display_type:<16} {display_class:<24} {enabled}/{visible:<3}")
+
+
+def _trim(text: str, width: int) -> str:
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return text[:width]
+    return f"{text[: width - 1]}…"
