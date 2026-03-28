@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import ntpath
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -10,6 +11,7 @@ from typing import Any
 from src.actions import perform_action
 from src.config_io import load_json
 from src.config_validation import validate_config
+from src.path_safety import resolve_base_dir, resolve_write_path
 from src.utils import make_output_file
 
 _ALERT_STATE_FILE = ".data_exporter_alert_state.json"
@@ -61,12 +63,82 @@ def _write_manifest(start_ts: str, manifest: dict) -> None:
 def _connect_window(app_cfg: dict):
     from pywinauto import Application, Desktop
 
+    def _canonical_path(value: str) -> str:
+        normalized = ntpath.normpath(value.replace("/", "\\"))
+        return ntpath.normcase(normalized)
+
+    def _is_unc_path(value: str) -> bool:
+        candidate = value.replace("/", "\\")
+        return candidate.startswith("\\\\")
+
+    def _is_normalized_path(value: str) -> bool:
+        if "/" in value and "\\" in value:
+            return False
+        candidate = value.replace("/", "\\")
+        parts = [segment for segment in candidate.split("\\") if segment]
+        if "." in parts or ".." in parts:
+            return False
+        return ntpath.normpath(candidate) == candidate.rstrip("\\") or candidate.endswith(":\\")
+
+    def _is_under_allowed_root(path: str, root: str) -> bool:
+        canonical_path = _canonical_path(path)
+        canonical_root = _canonical_path(root)
+        if canonical_path == canonical_root:
+            return True
+        return canonical_path.startswith(canonical_root.rstrip("\\") + "\\")
+
+    def _validate_exe_launch_policy(path: Path, cfg: dict) -> str | None:
+        path_text = str(path)
+
+        if not path.is_absolute():
+            return "Executable path must be absolute."
+
+        if not _is_normalized_path(path_text):
+            return "Executable path must be normalized before launch."
+
+        allow_network_exe = bool(cfg.get("allow_network_exe", False))
+        if _is_unc_path(path_text) and not allow_network_exe:
+            return "UNC/network executable paths are blocked by policy unless 'app.allow_network_exe' is true."
+
+        allowed_roots = cfg.get("allowed_exe_roots")
+        if not isinstance(allowed_roots, list) or not allowed_roots:
+            return "Execution policy requires 'app.allowed_exe_roots' when 'app.exe_path' is set."
+
+        if not any(isinstance(root, str) and _is_under_allowed_root(path_text, root) for root in allowed_roots):
+            return "Executable path is outside configured 'app.allowed_exe_roots'."
+
+        allowed_names = cfg.get("allowed_exe_names")
+        if isinstance(allowed_names, list) and allowed_names:
+            exe_name = path.name.lower()
+            normalized_names = {str(name).strip().lower() for name in allowed_names if isinstance(name, str)}
+            if exe_name not in normalized_names:
+                return "Executable file name is not listed in 'app.allowed_exe_names'."
+
+        expected_sha256 = cfg.get("exe_sha256")
+        if expected_sha256:
+            actual_sha256 = _file_sha256(path).lower()
+            if actual_sha256 != str(expected_sha256).strip().lower():
+                return "Executable SHA-256 does not match configured 'app.exe_sha256'."
+
+        return None
+
     backend = app_cfg.get("backend", "win32")
     title_re = app_cfg.get("window_title_regex", ".*")
     exe_path = app_cfg.get("exe_path")
     launch_if_needed = bool(app_cfg.get("launch_if_needed", True))
 
-    if launch_if_needed and exe_path and Path(exe_path).exists():
+    if launch_if_needed and exe_path:
+        exe_file = Path(exe_path)
+        if not exe_file.exists():
+            message = f"Configured executable does not exist: {exe_file}"
+            logging.error(message)
+            raise RuntimeError(message)
+
+        policy_error = _validate_exe_launch_policy(exe_file, app_cfg)
+        if policy_error:
+            logging.error("Execution policy validation failed for '%s': %s", exe_file, policy_error)
+            raise RuntimeError(policy_error)
+
         try:
             app = Application(backend=backend).start(exe_path)
             time.sleep(2)
@@ -263,8 +335,9 @@ def _save_alert_state(output_path: Path, state: dict) -> None:
     state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def _emit_alert(alerts_cfg: dict, *, alert_kind: str, message: str, metadata: dict | None = None, event_type: str = "error") -> None:
-    output_path = Path(alerts_cfg.get("output_path") or "alerts")
+def _emit_alert(
+    output_path: Path, *, alert_kind: str, message: str, metadata: dict | None = None, event_type: str = "error"
+) -> None:
     try:
         alert_file = _write_alert_file(output_path, alert_kind=alert_kind, message=message, metadata=metadata)
         logging.error("ALERT emitted (%s): %s | file=%s", alert_kind, message, alert_file)
@@ -302,12 +375,14 @@ def _run_workflow_cfg(cfg: dict, *, dry_run: bool = False) -> tuple[int, str | N
     app_cfg = cfg.get("app", {})
     export_cfg = cfg.get("export", {})
     workflow = cfg.get("workflow", [])
+    path_base_dir = resolve_base_dir(cfg.get("_path_base_dir"))
 
     output_file = make_output_file(
         output_dir=export_cfg.get("output_dir", "exports"),
         prefix=export_cfg.get("prefix", "valves"),
         include_timestamp_utc=bool(export_cfg.get("include_timestamp_utc", True)),
         include_run_id=bool(export_cfg.get("include_run_id", True)),
+        base_dir=path_base_dir,
     )
 
     started_at_utc = _utc_now_iso()
@@ -479,7 +554,12 @@ def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
     if not alerts_cfg.get("enabled", False):
         return
 
-    output_path = Path(alerts_cfg.get("output_path") or "alerts")
+    path_base_dir = resolve_base_dir(cfg.get("_path_base_dir"))
+    output_path = resolve_write_path(
+        alerts_cfg.get("output_path") or "alerts",
+        base_dir=path_base_dir,
+        reject_symlink_traversal=True,
+    )
     failure_threshold = max(int(alerts_cfg.get("failure_threshold", 3)), 1)
     sla_hours = float(alerts_cfg.get("sla_hours", 24))
 
@@ -506,7 +586,7 @@ def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
         already_sent_for = int(state.get("failure_alert_sent_for", 0))
         if consecutive_failures >= failure_threshold and already_sent_for < failure_threshold:
             _emit_alert(
-                alerts_cfg,
+                output_path,
                 alert_kind="failure_threshold",
                 message=(
                     f"Workflow has failed {consecutive_failures} consecutive run(s), "
@@ -526,7 +606,7 @@ def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
             deadline = reference_dt + timedelta(hours=sla_hours)
             if now >= deadline and not stale_active:
                 _emit_alert(
-                    alerts_cfg,
+                    output_path,
                     alert_kind="stale_data",
                     message="No successful run observed within SLA window " f"({sla_hours:g} hours).",
                     metadata={
@@ -542,9 +622,12 @@ def _handle_alerts_for_run(cfg: dict, run_status: int) -> None:
     _save_alert_state(output_path, state)
 
 
-def check_workflow(config_path: str, *, resolve_selectors: bool = False) -> int:
+def check_workflow(
+    config_path: str, *, resolve_selectors: bool = False, path_base_dir: str | Path | None = None
+) -> int:
     cfg = load_json(config_path)
-    errors = validate_config(cfg)
+    cfg["_path_base_dir"] = str(resolve_base_dir(path_base_dir or Path(config_path).resolve().parent))
+    errors = validate_config(cfg, base_dir=cfg["_path_base_dir"])
     if errors:
         for err in errors:
             logging.error("Config validation error: %s", err)
@@ -558,9 +641,10 @@ def check_workflow(config_path: str, *, resolve_selectors: bool = False) -> int:
     return _run_workflow_cfg(cfg, dry_run=True)[0]
 
 
-def run_workflow(config_path: str, dry_run: bool = False) -> int:
+def run_workflow(config_path: str, dry_run: bool = False, path_base_dir: str | Path | None = None) -> int:
     cfg = load_json(config_path)
-    errors = validate_config(cfg)
+    cfg["_path_base_dir"] = str(resolve_base_dir(path_base_dir or Path(config_path).resolve().parent))
+    errors = validate_config(cfg, base_dir=cfg["_path_base_dir"])
     if errors:
         for err in errors:
             logging.error("Config validation error: %s", err)
@@ -572,9 +656,10 @@ def run_workflow(config_path: str, dry_run: bool = False) -> int:
     return status
 
 
-def run_workflow_with_metadata(config_path: str) -> dict[str, Any]:
+def run_workflow_with_metadata(config_path: str, *, path_base_dir: str | Path | None = None) -> dict[str, Any]:
     cfg = load_json(config_path)
-    errors = validate_config(cfg)
+    cfg["_path_base_dir"] = str(resolve_base_dir(path_base_dir or Path(config_path).resolve().parent))
+    errors = validate_config(cfg, base_dir=cfg["_path_base_dir"])
     if errors:
         for err in errors:
             logging.error("Config validation error: %s", err)

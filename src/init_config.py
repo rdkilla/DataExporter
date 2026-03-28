@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from src.config_io import save_json
 from src.config_schema import make_base_config
 
@@ -18,7 +20,7 @@ def init_config(
     config["export"]["schedule"] = schedule
     config["export"]["timezone"] = timezone
 
-    save_json(config_path, config)
+    save_json(config_path, config, base_dir=Path.cwd())
 
     print(f"Starter config written to: {config_path}")
     print("Next steps:")
