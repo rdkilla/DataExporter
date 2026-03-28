@@ -38,6 +38,24 @@ python -m pip install -r requirements.txt
 
 ---
 
+## Quick test script
+
+For a one-command smoke test, run:
+
+```bash
+./run_test.sh
+```
+
+The script will:
+- create `configs/basic_test_config.json` if it does not exist,
+- create a local virtual environment in `.venv`,
+- install dependencies, and
+- run `python -m src check --config configs/basic_test_config.json`.
+
+Then you can edit that config and run trainer/runner on a Windows host.
+
+---
+
 ## CLI Commands
 
 The entry point is:
