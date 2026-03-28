@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 
 from src.actions import SUPPORTED_ACTIONS, perform_action
+from src.cli_theme import CliTheme, build_theme
 from src.config_io import save_json
 from src.config_schema import make_base_config, make_workflow_step
 from src.control_discovery import control_to_dict, list_controls
@@ -70,9 +71,10 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
             f"pid='{window['process_id']}' visible={window['visible']}",
             use_color=use_color,
         )
+        ui.emit(f"{ui.status_pill(str(i), 'accent')} {window_summary}", "primary")
 
     try:
-        selected_window = windows[ask_int("\nSelect window number: ")]
+        selected_window = windows[ask_int(f"\n{ui.status_pill('SELECT', 'accent')} window number: ")]
     except Exception:
         print_error("Invalid selection.", use_color=use_color)
         return 1
@@ -119,6 +121,7 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
             choice = input("\nSelect control index, or [s]ave/[q]uit: ").strip().lower()
 
         if choice == "q":
+            ui.emit("Exiting trainer.", "muted")
             return 0
         if choice == "s":
             return _save_workflow(backend, selected_window, workflow_steps, use_color=use_color)
@@ -135,6 +138,7 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
         for key, value in control_meta.items():
             print_row(f"- {key}: {value}", use_color=use_color)
 
+        ui.emit_section("Actions")
         for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
             print_row(f"{idx}. {action}", use_color=use_color)
 
@@ -150,7 +154,8 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
         value = None
         if action in {"set_text", "type_keys", "send_keys"}:
             value = input(
-                "Enter action value (macros: {output_file}, {now}, {now:%Y%m%d_%H%M}): "
+                f"{ui.status_pill('INPUT', 'muted')} action value "
+                "(macros: {output_file}, {now}, {now:%Y%m%d_%H%M}): "
             )
 
         try:
@@ -160,13 +165,16 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
             print_error(f"Action failed: {exc}", use_color=use_color)
             continue
 
-        should_add = input("Add this action to workflow? [y/N]: ").strip().lower()
+        should_add = input(f"{ui.status_pill('INPUT', 'muted')} add action to workflow? [y/N]: ").strip().lower()
         if should_add != "y":
             continue
 
-        step_name = input("Step name: ").strip() or f"step_{len(workflow_steps) + 1}"
-        delay_after = ask_float("Delay after (seconds, default 0): ", default=0.0)
-        retries = ask_int("Retries (default 0): ", default=0)
+        step_name = input(f"{ui.status_pill('INPUT', 'muted')} step name: ").strip() or f"step_{len(workflow_steps) + 1}"
+        delay_after = ask_float(
+            f"{ui.status_pill('INPUT', 'muted')} delay after (seconds, default 0): ",
+            default=0.0,
+        )
+        retries = ask_int(f"{ui.status_pill('INPUT', 'muted')} retries (default 0): ", default=0)
 
         workflow_steps.append(
             make_workflow_step(
@@ -202,9 +210,12 @@ def _save_workflow(backend: str, selected_window: dict, workflow_steps: list, *,
         print_error("No workflow steps collected. Nothing to save.", use_color=use_color)
         return 0
 
-    output_dir = input("Export output directory [exports]: ").strip() or "exports"
-    exe_path = input("Vendor exe path (optional): ").strip() or None
-    config_path = input("Config file path [configs/vendor_export.json]: ").strip() or "configs/vendor_export.json"
+    output_dir = input(f"{ui.status_pill('INPUT', 'muted')} export output directory [exports]: ").strip() or "exports"
+    exe_path = input(f"{ui.status_pill('INPUT', 'muted')} vendor exe path (optional): ").strip() or None
+    config_path = (
+        input(f"{ui.status_pill('INPUT', 'muted')} config file path [configs/vendor_export.json]: ").strip()
+        or "configs/vendor_export.json"
+    )
 
     config = make_base_config(
         backend=backend,

@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+from src.cli_theme import build_theme
 from src.logging_setup import setup_logging
 
 
@@ -27,6 +28,13 @@ def _print_startup_banner(command: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Valve Export Tool")
+    parser.add_argument(
+        "--theme",
+        choices=["minimal", "standard", "vibrant"],
+        default=None,
+        help="CLI theme mode (or set DATA_EXPORTER_THEME)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     trainer_parser = subparsers.add_parser("trainer", help="Run interactive trainer")
