@@ -2,14 +2,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from src.path_safety import resolve_write_path
+
 
 def make_output_file(
     output_dir: str,
     prefix: str = "valves",
     include_timestamp_utc: bool = True,
     include_run_id: bool = True,
+    base_dir: str | Path | None = None,
 ) -> str:
-    folder = Path(output_dir)
+    folder = resolve_write_path(output_dir, base_dir=base_dir, reject_symlink_traversal=True)
     folder.mkdir(parents=True, exist_ok=True)
 
     safe_prefix = (prefix or "valves").strip() or "valves"

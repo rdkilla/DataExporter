@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from src.actions import SUPPORTED_ACTIONS, perform_action
 from src.config_io import save_json
 from src.config_schema import make_base_config, make_workflow_step
@@ -146,7 +148,7 @@ def _save_workflow(backend: str, selected_window: dict, workflow_steps: list) ->
     )
     config["workflow"] = workflow_steps
 
-    save_json(config_path, config)
+    save_json(config_path, config, base_dir=Path.cwd())
     print(f"Saved workflow to {config_path}")
     return 0
 
