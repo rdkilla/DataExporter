@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from src.actions import SUPPORTED_ACTIONS, perform_action
@@ -9,59 +10,113 @@ from src.window_discovery import list_windows
 
 
 def run_trainer(backend: str = "win32") -> int:
+    icons = _menu_icons()
+    advanced_menu = _advanced_menu_available()
     windows = list_windows(backend=backend, include_hidden=False)
     if not windows:
         windows = list_windows(backend=backend, include_hidden=True)
     if not windows:
-        print("No windows found.")
+        print(f"{icons['error']} No windows found.")
         return 1
 
-    print("\nOpen windows:\n")
+    print(f"\n{icons['pointer']} Window picker\n")
     if backend == "win32":
-        print("Tip: If controls look empty on Windows 11, retry with '--backend uia'.\n")
-    for i, window in enumerate(windows):
-        print(
-            f"[{i}] title='{window['title']}' "
-            f"class='{window['class_name']}' handle='{window['handle']}' "
-            f"pid='{window['process_id']}' visible={window['visible']}"
-        )
+        print(f"{icons['warn']} Tip: If controls look empty on Windows 11, retry with '--backend uia'.\n")
+    _print_window_menu(windows)
 
-    try:
-        selected_window = windows[ask_int("\nSelect window number: ")]
-    except Exception:
-        print("Invalid selection.")
+    selected_index = _prompt_pick_index(
+        windows,
+        prompt=f"\n{icons['pointer']} Select window index: ",
+        invalid_message=f"{icons['error']} Invalid selection.",
+    )
+    if selected_index is None:
         return 1
+    selected_window = windows[selected_index]
 
     wrapper = selected_window["wrapper"]
     controls = list_controls(wrapper)
     if not controls:
-        print("No controls found.")
+        print(f"{icons['error']} No controls found.")
         return 1
 
     workflow_steps = []
+    filter_text = ""
+    page_size = 25
+    page = 0
     while True:
-        print("\nControls:\n")
-        for i, control in enumerate(controls[:300]):
-            info = control_to_dict(control)
-            display_name = info["name"] or "<no name>"
-            display_type = info["control_type"] or "<unknown>"
-            display_class = info["class_name"] or "<unknown>"
-            print(
-                f"[{i}] Name='{display_name}' | Type='{display_type}' | "
-                f"Class='{display_class}' | AutomationId='{info['automation_id']}' | "
-                f"Enabled={info['enabled']} Visible={info['visible']}"
+        if advanced_menu:
+            filtered = _filter_controls(controls, filter_text=filter_text)
+            max_page = max((len(filtered) - 1) // page_size, 0)
+            page = min(page, max_page)
+            print()
+            _print_controls_menu(
+                filtered,
+                page=page,
+                page_size=page_size,
+                filter_text=filter_text,
+                max_items=300,
             )
+            choice = input(
+                "\nSelect control index | commands: [n]ext [p]rev [f]ilter [d]etails [s]ave [q]uit: "
+            ).strip().lower()
+        else:
+            print("\nControls:\n")
+            for i, control in enumerate(controls[:300]):
+                info = control_to_dict(control)
+                display_name = info["name"] or "<no name>"
+                display_type = info["control_type"] or "<unknown>"
+                display_class = info["class_name"] or "<unknown>"
+                print(
+                    f"[{i}] Name='{display_name}' | Type='{display_type}' | "
+                    f"Class='{display_class}' | AutomationId='{info['automation_id']}' | "
+                    f"Enabled={info['enabled']} Visible={info['visible']}"
+                )
+            choice = input("\nSelect control index, or [s]ave/[q]uit: ").strip().lower()
 
-        choice = input("\nSelect control index, or [s]ave/[q]uit: ").strip().lower()
         if choice == "q":
             return 0
         if choice == "s":
             return _save_workflow(backend, selected_window, workflow_steps)
+        if not advanced_menu:
+            pass
+        elif choice == "n":
+            if page < max_page:
+                page += 1
+            else:
+                print(f"{icons['warn']} Already at last page.")
+            continue
+        elif choice == "p":
+            if page > 0:
+                page -= 1
+            else:
+                print(f"{icons['warn']} Already at first page.")
+            continue
+        elif choice == "f":
+            filter_text = input("Filter text (name/type/class, blank clears): ").strip().lower()
+            page = 0
+            continue
+        elif choice.startswith("d"):
+            details_raw = choice[1:].strip()
+            if not details_raw:
+                details_raw = input("Details for control index: ").strip()
+            if not details_raw.isdigit():
+                print(f"{icons['error']} Invalid detail index.")
+                continue
+            details_idx = int(details_raw)
+            if details_idx < 0 or details_idx >= len(controls):
+                print(f"{icons['error']} Detail index out of range.")
+                continue
+            control_meta = control_to_dict(controls[details_idx])
+            print("\nControl details:")
+            for key, value in control_meta.items():
+                print(f"- {key}: {value}")
+            continue
 
         try:
             control = controls[int(choice)]
+            selected_control_index = int(choice)
         except Exception:
-            print("Invalid control selection.")
+            print(f"{icons['error']} Invalid control selection.")
             continue
 
         control_meta = control_to_dict(control)
@@ -69,16 +124,15 @@ def run_trainer(backend: str = "win32") -> int:
         for key, value in control_meta.items():
             print(f"- {key}: {value}")
 
-        for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
-            print(f"{idx}. {action}")
+        _print_action_menu()
 
-        raw_action = input("Choose action number (or blank to cancel): ").strip()
+        raw_action = input(f"{icons['pointer']} Choose action number (or blank to cancel): ").strip()
         if not raw_action:
             continue
         try:
             action = SUPPORTED_ACTIONS[int(raw_action) - 1]
         except Exception:
-            print("Invalid action.")
+            print(f"{icons['error']} Invalid action.")
             continue
 
         value = None
@@ -89,9 +143,9 @@ def run_trainer(backend: str = "win32") -> int:
 
         try:
             result = perform_action(control, action, value)
-            print(f"Action completed: {result}")
+            print(f"{icons['ok']} Action completed: {result}")
         except Exception as exc:
-            print(f"Action failed: {exc}")
+            print(f"{icons['error']} Action failed: {exc}")
             continue
 
         should_add = input("Add this action to workflow? [y/N]: ").strip().lower()
@@ -114,7 +168,7 @@ def run_trainer(backend: str = "win32") -> int:
                     "framework_id": control_meta.get("framework_id"),
                     "process_id": control_meta.get("process_id"),
                     "title_regex": _make_title_regex(control_meta.get("name")),
-                    "found_index": int(choice),
+                    "found_index": selected_control_index,
                     "coordinates": control_meta.get("click_point"),
                 },
                 action=action,
@@ -128,7 +182,7 @@ def run_trainer(backend: str = "win32") -> int:
                 },
             )
         )
-        print(f"Step saved in session. Total steps: {len(workflow_steps)}")
+        print(f"{icons['ok']} Step saved in session. Total steps: {len(workflow_steps)}")
 
 
 def _save_workflow(backend: str, selected_window: dict, workflow_steps: list) -> int:
@@ -160,3 +214,115 @@ def _make_title_regex(name: str | None) -> str | None:
     if not escaped:
         return None
     return f".*{escaped}.*"
+
+
+def _menu_icons() -> dict[str, str]:
+    fallback = {
+        "ok": "[OK]",
+        "warn": "[!]",
+        "error": "[X]",
+        "pointer": "->",
+    }
+    fancy = {
+        "ok": "✅",
+        "warn": "⚠️",
+        "error": "❌",
+        "pointer": "👉",
+    }
+    try:
+        "".join(fancy.values()).encode("utf-8")
+    except Exception:
+        return fallback
+    return fancy
+
+
+def _advanced_menu_available() -> bool:
+    encoding = (getattr(sys.stdout, "encoding", None) or "").lower()
+    if "utf" not in encoding:
+        return False
+    return True
+
+
+def _prompt_pick_index(items: list, prompt: str, invalid_message: str) -> int | None:
+    try:
+        index = ask_int(prompt)
+        if index < 0 or index >= len(items):
+            print(invalid_message)
+            return None
+        return index
+    except Exception:
+        print(invalid_message)
+        return None
+
+
+def _print_window_menu(windows: list[dict]) -> None:
+    for i, window in enumerate(windows):
+        print(
+            f"[{i:>3}] "
+            f"title='{window['title']}' class='{window['class_name']}' "
+            f"handle='{window['handle']}' pid='{window['process_id']}' visible={window['visible']}"
+        )
+
+
+def _print_action_menu() -> None:
+    icons = _menu_icons()
+    print(f"\n{icons['pointer']} Action picker")
+    for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
+        print(f"[{idx:>2}] {action}")
+
+
+def _filter_controls(controls: list, filter_text: str) -> list[tuple[int, dict]]:
+    filtered = []
+    lowered_filter = filter_text.strip().lower()
+    for idx, control in enumerate(controls[:300]):
+        info = control_to_dict(control)
+        haystack = " ".join(
+            [
+                str(info.get("name", "")),
+                str(info.get("control_type", "")),
+                str(info.get("class_name", "")),
+                str(info.get("automation_id", "")),
+            ]
+        ).lower()
+        if lowered_filter and lowered_filter not in haystack:
+            continue
+        filtered.append((idx, info))
+    return filtered
+
+
+def _print_controls_menu(
+    filtered_controls: list[tuple[int, dict]],
+    page: int,
+    page_size: int,
+    filter_text: str,
+    max_items: int,
+) -> None:
+    icons = _menu_icons()
+    print(f"{icons['pointer']} Control picker")
+    if filter_text:
+        print(f"Filter: '{filter_text}'")
+    total = len(filtered_controls)
+    start = page * page_size
+    end = min(start + page_size, total)
+    print(f"Showing {start + 1 if total else 0}-{end} of {total} (max scanned: {max_items})")
+    print(f"{'Idx':>5}  {'Name':<30} {'Type':<16} {'Class':<24} {'E/V':<5}")
+    print("-" * 88)
+    if not filtered_controls:
+        print("(no controls match the current filter)")
+        return
+
+    for index, info in filtered_controls[start:end]:
+        display_name = _trim(info.get("name") or "<no name>", 30)
+        display_type = _trim(info.get("control_type") or "<unknown>", 16)
+        display_class = _trim(info.get("class_name") or "<unknown>", 24)
+        enabled = "Y" if info.get("enabled") else "N"
+        visible = "Y" if info.get("visible") else "N"
+        print(f"{index:>5}  {display_name:<30} {display_type:<16} {display_class:<24} {enabled}/{visible:<3}")
+
+
+def _trim(text: str, width: int) -> str:
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return text[:width]
+    return f"{text[: width - 1]}…"
