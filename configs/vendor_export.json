@@ -14,7 +14,39 @@
       "end": "06:00"
     }
   },
-  "workflow": [],
+  "workflow": [
+    {
+      "name": "focus_export_button",
+      "window": {
+        "title": "Vendor App"
+      },
+      "control": {
+        "name": "Export",
+        "control_type": "Button",
+        "class_name": "Button",
+        "automation_id": "btnExport"
+      },
+      "action": "click_input",
+      "delay_after": 1.0,
+      "retries": 1
+    },
+    {
+      "name": "enter_output_path",
+      "window": {
+        "title": "Vendor App"
+      },
+      "control": {
+        "name": "File name",
+        "control_type": "Edit",
+        "class_name": "Edit",
+        "automation_id": "txtPath"
+      },
+      "action": "set_text",
+      "value": "{output_file}",
+      "delay_after": 0.5,
+      "retries": 2
+    }
+  ],
   "alerts": {
     "enabled": false,
     "failure_threshold": 3,
