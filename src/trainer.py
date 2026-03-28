@@ -8,6 +8,15 @@ from src.utils import ask_float, ask_int
 from src.window_discovery import list_windows
 
 
+def _print_how_to_use_panel(backend: str) -> None:
+    print("\nHow to use trainer:")
+    print("  1) Pick a target window.")
+    print("  2) Pick a control, run an action, and confirm adding it.")
+    print("  3) Save when your steps look good.\n")
+    if backend == "win32":
+        print("Tip: If controls look empty on Windows 11, retry with '--backend uia'.\n")
+
+
 def run_trainer(backend: str = "win32") -> int:
     windows = list_windows(backend=backend, include_hidden=False)
     if not windows:
@@ -16,9 +25,8 @@ def run_trainer(backend: str = "win32") -> int:
         print("No windows found.")
         return 1
 
-    print("\nOpen windows:\n")
-    if backend == "win32":
-        print("Tip: If controls look empty on Windows 11, retry with '--backend uia'.\n")
+    _print_how_to_use_panel(backend)
+    print("Open windows:\n")
     for i, window in enumerate(windows):
         print(
             f"[{i}] title='{window['title']}' "
