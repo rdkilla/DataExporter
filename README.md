@@ -64,6 +64,25 @@ The entry point is:
 python -m src <command> [options]
 ```
 
+### Recommended first command: initialize a starter config
+
+Generate a starter workflow JSON from defaults:
+
+```bash
+python -m src init --config configs/vendor_export.json
+```
+
+Optional starter overrides:
+
+```bash
+python -m src init --config configs/vendor_export.json --backend uia --output-dir exports --schedule "every 4 hours" --timezone America/Chicago
+```
+
+After generation, the command prints recommended next steps for:
+- `check`
+- `trainer`
+- `run`
+
 ### 1) Trainer mode
 
 Interactive mode for selecting a target window, testing actions, and building workflow steps.
@@ -101,7 +120,21 @@ python -m src daemon --config configs/vendor_export.json --state-file state/run_
 
 On startup, daemon mode inspects `state/run_history.json`, detects missed scheduling windows, and performs capped catch-up runs based on `export.max_missed_runs_to_catch_up`.
 
-### 4) Package mode
+### 4) Check mode
+
+Validate workflow configuration before running automation.
+
+```bash
+python -m src check --config configs/vendor_export.json
+```
+
+Optionally perform selector connectivity checks without executing actions:
+
+```bash
+python -m src check --config configs/vendor_export.json --resolve-selectors
+```
+
+### 5) Package mode
 
 Build a distributable executable with PyInstaller.
 
@@ -116,20 +149,6 @@ Useful options:
 - `--spec-dir <path>` spec output folder (default: current directory).
 - `--no-clean` keep PyInstaller cache.
 - `--pyinstaller-arg <arg>` pass through additional PyInstaller arguments (repeatable).
-
-### 4) Check mode
-
-Validate workflow configuration before running automation.
-
-```bash
-python -m src check --config configs/vendor_export.json
-```
-
-Optionally perform selector connectivity checks without executing actions:
-
-```bash
-python -m src check --config configs/vendor_export.json --resolve-selectors
-```
 
 > For best compatibility with older targets (such as Windows 7), build on a Windows machine that closely matches the target environment.
 
@@ -246,13 +265,14 @@ Trainer/runner actions currently supported:
 
 ## Typical usage flow
 
-1. Launch the vendor application manually.
-2. Run trainer mode and select the correct window.
-3. Test actions on relevant controls.
-4. Add successful actions to the workflow (for filename entry steps, you can use macros like `"{output_file}"` or `"Report_{now:%Y%m%d}.csv"` as the action value).
-5. Save config JSON (for example `configs/vendor_export.json`).
-6. Run the workflow with `python -m src run --config ...`.
-7. Verify the CSV file was created and is non-empty.
+1. Generate a starter config: `python -m src init --config configs/vendor_export.json`.
+2. Launch the vendor application manually.
+3. Run trainer mode and select the correct window.
+4. Test actions on relevant controls.
+5. Add successful actions to the workflow (for filename entry steps, you can use macros like `"{output_file}"` or `"Report_{now:%Y%m%d}.csv"` as the action value).
+6. Save config JSON updates (for example `configs/vendor_export.json`).
+7. Run the workflow with `python -m src run --config ...`.
+8. Verify the CSV file was created and is non-empty.
 
 ---
 
