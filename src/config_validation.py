@@ -209,6 +209,15 @@ def validate_config(config: dict, *, base_dir: str | Path | None = None) -> list
                         "'security.dangerous_key_chords_denylist' must contain only non-empty strings."
                     )
 
+    logging_cfg = config.get("logging")
+    if logging_cfg is not None:
+        if not isinstance(logging_cfg, dict):
+            errors.append("'logging' must be an object when provided.")
+        else:
+            redact_ui_text = logging_cfg.get("redact_ui_text")
+            if redact_ui_text is not None and not isinstance(redact_ui_text, bool):
+                errors.append("'logging.redact_ui_text' must be a boolean when provided.")
+
     workflow = config.get("workflow")
     if not isinstance(workflow, list):
         errors.append("'workflow' must be a list of step objects.")
@@ -253,5 +262,31 @@ def validate_config(config: dict, *, base_dir: str | Path | None = None) -> list
                 errors.append(
                     f"{step_label}.value is required and must be a non-empty string for action '{action}'."
                 )
+
+        retries = step.get("retries")
+        if retries is not None:
+            if isinstance(retries, bool) or not isinstance(retries, int):
+                errors.append(
+                    f"{step_label}.retries must be an integer between {STEP_RETRIES_MIN} and {STEP_RETRIES_MAX}."
+                )
+            elif not (STEP_RETRIES_MIN <= retries <= STEP_RETRIES_MAX):
+                errors.append(
+                    f"{step_label}.retries must be between {STEP_RETRIES_MIN} and {STEP_RETRIES_MAX}."
+                )
+
+        delay_after = step.get("delay_after")
+        if delay_after is not None:
+            if isinstance(delay_after, bool) or not isinstance(delay_after, (int, float)):
+                errors.append(
+                    f"{step_label}.delay_after must be a number between {STEP_DELAY_AFTER_MIN:g} and {STEP_DELAY_AFTER_MAX:g} seconds."
+                )
+            else:
+                delay_after_float = float(delay_after)
+                if not math.isfinite(delay_after_float):
+                    errors.append(f"{step_label}.delay_after must be a finite number.")
+                elif not (STEP_DELAY_AFTER_MIN <= delay_after_float <= STEP_DELAY_AFTER_MAX):
+                    errors.append(
+                        f"{step_label}.delay_after must be between {STEP_DELAY_AFTER_MIN:g} and {STEP_DELAY_AFTER_MAX:g} seconds."
+                    )
 
     return errors

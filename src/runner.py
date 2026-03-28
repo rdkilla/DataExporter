@@ -17,6 +17,10 @@ from src.utils import make_output_file
 _ALERT_STATE_FILE = ".data_exporter_alert_state.json"
 _EVENT_LOG_SOURCE = "DataExporter"
 _DEFAULT_NOW_FORMAT = "%Y-%m-%d_%H%M%S"
+_STEP_RETRIES_MIN = 0
+_STEP_RETRIES_MAX = 10
+_STEP_DELAY_AFTER_MIN = 0.0
+_STEP_DELAY_AFTER_MAX = 30.0
 
 
 def _utc_now() -> datetime:
@@ -371,6 +375,47 @@ def _build_manifest(app_cfg: dict, export_cfg: dict, output_file: str, dry_run: 
     }
 
 
+def _should_redact_ui_text(cfg: dict) -> bool:
+    logging_cfg = cfg.get("logging")
+    if not isinstance(logging_cfg, dict):
+        return True
+    redact_value = logging_cfg.get("redact_ui_text", True)
+    return bool(redact_value)
+
+
+def _validated_step_retries(step: dict, step_name: str) -> int:
+    retries = step.get("retries", 0)
+    if isinstance(retries, bool) or not isinstance(retries, int):
+        raise ValueError(
+            f"Step '{step_name}' has invalid retries={retries!r}; expected integer in "
+            f"[{_STEP_RETRIES_MIN}, {_STEP_RETRIES_MAX}]"
+        )
+    if not (_STEP_RETRIES_MIN <= retries <= _STEP_RETRIES_MAX):
+        raise ValueError(
+            f"Step '{step_name}' retries out of range ({retries}); expected "
+            f"[{_STEP_RETRIES_MIN}, {_STEP_RETRIES_MAX}]"
+        )
+    return retries
+
+
+def _validated_step_delay_after(step: dict, step_name: str) -> float:
+    delay_after = step.get("delay_after", 0)
+    if isinstance(delay_after, bool) or not isinstance(delay_after, (int, float)):
+        raise ValueError(
+            f"Step '{step_name}' has invalid delay_after={delay_after!r}; expected number in "
+            f"[{_STEP_DELAY_AFTER_MIN:g}, {_STEP_DELAY_AFTER_MAX:g}] seconds"
+        )
+    delay_after_float = float(delay_after)
+    if not math.isfinite(delay_after_float):
+        raise ValueError(f"Step '{step_name}' has non-finite delay_after={delay_after!r}")
+    if not (_STEP_DELAY_AFTER_MIN <= delay_after_float <= _STEP_DELAY_AFTER_MAX):
+        raise ValueError(
+            f"Step '{step_name}' delay_after out of range ({delay_after_float}); expected "
+            f"[{_STEP_DELAY_AFTER_MIN:g}, {_STEP_DELAY_AFTER_MAX:g}] seconds"
+        )
+    return delay_after_float
+
+
 def _run_workflow_cfg(cfg: dict, *, dry_run: bool = False) -> tuple[int, str | None]:
     app_cfg = cfg.get("app", {})
     export_cfg = cfg.get("export", {})
@@ -417,11 +462,12 @@ def _run_workflow_cfg(cfg: dict, *, dry_run: bool = False) -> tuple[int, str | N
     unresolvable_required_steps: list[str] = []
     resolved_steps: list[str] = []
     macro_now_utc = _utc_now()
+    redact_ui_text = _should_redact_ui_text(cfg)
 
     for step in workflow:
         step_name = step.get("name", "<unnamed>")
-        retries = int(step.get("retries", 0))
-        delay_after = float(step.get("delay_after", 0))
+        retries = _validated_step_retries(step, step_name)
+        delay_after = _validated_step_delay_after(step, step_name)
         action = step["action"]
         control_cfg = step["control"]
         step_window_cfg = step.get("window")
@@ -444,8 +490,19 @@ def _run_workflow_cfg(cfg: dict, *, dry_run: bool = False) -> tuple[int, str | N
                     if action == "read_text":
                         try:
                             text = str(control.window_text())
-                            logging.info("Dry-run read_text value: %s | value=%r", step_name, text)
-                            print(f"[DRY-RUN] read_text current value for '{step_name}': {text!r}")
+                            if redact_ui_text:
+                                logging.info(
+                                    "Dry-run read_text captured for step=%s (redacted; chars=%s)",
+                                    step_name,
+                                    len(text),
+                                )
+                                print(
+                                    f"[DRY-RUN] read_text current value for '{step_name}': "
+                                    "[REDACTED]"
+                                )
+                            else:
+                                logging.debug("Dry-run read_text value: %s | value=%r", step_name, text)
+                                print(f"[DRY-RUN] read_text current value for '{step_name}': {text!r}")
                         except Exception as exc:
                             logging.warning("Dry-run read_text capture failed: %s | error=%s", step_name, exc)
                             print(f"[DRY-RUN] read_text capture failed for '{step_name}': {exc}")
@@ -459,7 +516,14 @@ def _run_workflow_cfg(cfg: dict, *, dry_run: bool = False) -> tuple[int, str | N
                     )
                     if delay_after > 0:
                         time.sleep(delay_after)
-                    logging.info("Step succeeded: %s | %s", step_name, result)
+                    if action == "read_text" and redact_ui_text:
+                        logging.info(
+                            "Step succeeded: %s | read_text=[REDACTED] | chars=%s",
+                            step_name,
+                            len(str(result)),
+                        )
+                    else:
+                        logging.info("Step succeeded: %s | %s", step_name, result)
                 manifest["workflow_steps"].append(
                     {
                         "name": step_name,

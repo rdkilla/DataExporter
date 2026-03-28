@@ -38,6 +38,9 @@ def make_base_config(backend: str, window_title_regex: str, exe_path: str | None
             "sla_hours": 24,
             "output_path": "alerts",
         },
+        "logging": {
+            "redact_ui_text": True,
+        },
     }
 
 
