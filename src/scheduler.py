@@ -3,10 +3,11 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, time as dt_time, timedelta, timezone
+from datetime import datetime, time as dt_time, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
+
+from src.timezone_utils import resolve_timezone
 
 _INTERVAL_RE = re.compile(r"^(?P<value>\d+)\s*(?P<unit>[smhd]|seconds?|minutes?|hours?|days?)$", re.IGNORECASE)
 
@@ -25,7 +26,7 @@ class QuietHours:
 
 @dataclass(frozen=True)
 class SchedulePolicy:
-    timezone: ZoneInfo
+    timezone: tzinfo
     mode: str
     interval: timedelta | None = None
     cron_minutes: set[int] | None = None
@@ -43,7 +44,7 @@ class SchedulePolicy:
             raise ValueError("export.schedule is required for daemon mode")
 
         tz_name = export_cfg.get("timezone", "UTC")
-        timezone = ZoneInfo(tz_name)
+        timezone = resolve_timezone(tz_name)
 
         quiet = _parse_quiet_hours(export_cfg.get("quiet_hours"))
         max_missed = int(export_cfg.get("max_missed_runs_to_catch_up", 0))
@@ -262,7 +263,7 @@ def _append_history(path: str, record: dict[str, Any]) -> None:
         json.dump({"runs": history}, file, indent=2)
 
 
-def _last_planned_time(history: list[dict[str, Any]], timezone: ZoneInfo) -> datetime | None:
+def _last_planned_time(history: list[dict[str, Any]], timezone: tzinfo) -> datetime | None:
     for item in reversed(history):
         planned = item.get("planned_time")
         if not planned:

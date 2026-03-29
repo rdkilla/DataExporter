@@ -1,5 +1,4 @@
 from pathlib import Path
-from zoneinfo import ZoneInfo
 import math
 import ntpath
 import re
@@ -7,6 +6,7 @@ import re
 from src.actions import SUPPORTED_ACTIONS
 from src.path_safety import PathSafetyError, resolve_base_dir, resolve_write_path
 from src.scheduler import SchedulePolicy
+from src.timezone_utils import resolve_timezone
 
 
 REQUIRED_TOP_LEVEL_KEYS = ("app", "export", "workflow")
@@ -158,9 +158,9 @@ def validate_config(config: dict, *, base_dir: str | Path | None = None) -> list
             errors.append("'export.timezone' must be a non-empty IANA timezone string.")
         else:
             try:
-                ZoneInfo(timezone_name)
+                resolve_timezone(timezone_name)
             except Exception:
-                errors.append(f"'export.timezone' is not a valid IANA timezone: '{timezone_name}'.")
+                errors.append(f"'export.timezone' is not a valid IANA timezone or UTC alias: '{timezone_name}'.")
 
         max_missed = export.get("max_missed_runs_to_catch_up")
         if max_missed is not None and (not isinstance(max_missed, int) or max_missed < 0):
