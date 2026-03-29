@@ -316,19 +316,28 @@ def _print_controls_menu(
     start = page * page_size
     end = min(start + page_size, total)
     print(f"Showing {start + 1 if total else 0}-{end} of {total} (max scanned: {max_items})")
-    print(f"{'Idx':>5}  {'Name':<30} {'Type':<16} {'Class':<24} {'E/V':<5}")
-    print("-" * 88)
+    print(
+        f"{'Idx':>5}  {'Name':<26} {'Type':<14} {'Class':<20} "
+        f"{'AutoId':<16} {'CtrlId':<7} {'E/V':<5}"
+    )
+    print("-" * 106)
     if not filtered_controls:
         print("(no controls match the current filter)")
         return
 
     for index, info in filtered_controls[start:end]:
-        display_name = _trim(info.get("name") or "<no name>", 30)
-        display_type = _trim(info.get("control_type") or "<unknown>", 16)
-        display_class = _trim(info.get("class_name") or "<unknown>", 24)
+        display_name = _trim(info.get("name") or "<no name>", 26)
+        display_type = _trim(info.get("control_type") or "<unknown>", 14)
+        display_class = _trim(info.get("class_name") or "<unknown>", 20)
+        display_auto_id = _trim(info.get("automation_id") or "<none>", 16)
+        control_id = info.get("control_id")
+        display_control_id = _trim(str(control_id) if control_id is not None else "<none>", 7)
         enabled = "Y" if info.get("enabled") else "N"
         visible = "Y" if info.get("visible") else "N"
-        print(f"{index:>5}  {display_name:<30} {display_type:<16} {display_class:<24} {enabled}/{visible:<3}")
+        print(
+            f"{index:>5}  {display_name:<26} {display_type:<14} {display_class:<20} "
+            f"{display_auto_id:<16} {display_control_id:<7} {enabled}/{visible:<3}"
+        )
 
 
 def _trim(text: str, width: int) -> str:
