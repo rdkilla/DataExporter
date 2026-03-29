@@ -1,4 +1,5 @@
 import sys
+from shutil import get_terminal_size
 from pathlib import Path
 
 from src.actions import SUPPORTED_ACTIONS, perform_action
@@ -51,6 +52,43 @@ def print_hint(text: str, *, use_color: bool) -> None:
     print(_style(text, "hint", use_color))
 
 
+def _supports_ansi_cursor() -> bool:
+    if not sys.stdout.isatty():
+        return False
+    term = (getattr(sys.stdout, "encoding", None) or "").lower()
+    return "utf" in term
+
+
+def _render_help_panel() -> None:
+    if not _supports_ansi_cursor():
+        return
+
+    width = max(80, get_terminal_size((120, 40)).columns)
+    panel_width = 48
+    panel_x = max(1, width - panel_width + 1)
+    panel_lines = [
+        "Trainer help",
+        "• n/p: paginate controls",
+        "• f: filter controls by text",
+        "• d: view full control details",
+        "• number: test action on control",
+        "• s: save workflow to JSON",
+        "• q: quit trainer",
+    ]
+
+    top = "┌" + ("─" * (panel_width - 2)) + "┐"
+    bottom = "└" + ("─" * (panel_width - 2)) + "┘"
+    boxed = [top]
+    for line in panel_lines:
+        text = line[: panel_width - 4]
+        boxed.append(f"│ {text:<{panel_width - 4}} │")
+    boxed.append(bottom)
+
+    for row, line in enumerate(boxed, start=1):
+        print(f"\033[{row};{panel_x}H{line}")
+    print("\033[11;1H", end="")
+
+
 def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
     use_color = _should_use_color(no_color)
     windows = list_windows(backend=backend, include_hidden=False)
@@ -87,6 +125,9 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
         total_pages = max(1, (len(filtered_controls) + page_size - 1) // page_size)
         page = max(0, min(page, total_pages - 1))
 
+        if _supports_ansi_cursor():
+            print("\033[2J\033[H", end="")
+            _render_help_panel()
         print_heading("Controls", use_color=use_color)
         _print_controls_menu(filtered_controls, page, page_size, filter_text, max_items)
 
