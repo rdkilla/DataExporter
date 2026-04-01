@@ -23,7 +23,7 @@ def _print_startup_banner(command: str) -> None:
         return
 
     mode = command.upper()
-    print(f"{_color(TOOL_NAME, '1;36', enabled=True)} · mode: {mode}")
+    print(f"{_color(TOOL_NAME, '1;36', enabled=True)} - mode: {mode}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -178,7 +178,9 @@ def main() -> int:
     if args.command == "trainer":
         from src.trainer import run_trainer
 
-        return run_trainer(backend=args.backend, no_color=args.no_color)
+        theme_mode = "minimal" if args.no_color else args.theme
+        theme = build_theme(theme_mode)
+        return run_trainer(backend=args.backend, no_color=args.no_color, theme=theme)
 
     if args.command == "run":
         from src.runner import run_workflow

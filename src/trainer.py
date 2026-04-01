@@ -3,6 +3,7 @@ from shutil import get_terminal_size
 from pathlib import Path
 
 from src.actions import SUPPORTED_ACTIONS, perform_action
+from src.cli_theme import CliTheme, build_theme
 from src.config_io import save_json
 from src.config_schema import make_base_config, make_workflow_step
 from src.control_discovery import control_to_dict, list_controls
@@ -32,23 +33,38 @@ def _style(text: str, tone: str, use_color: bool) -> str:
     return f"{STYLES[tone]}{text}{RESET}"
 
 
-def print_heading(text: str, *, use_color: bool) -> None:
+def print_heading(text: str, *, use_color: bool, theme: CliTheme | None = None) -> None:
+    if theme is not None:
+        print(theme.section(text))
+        return
     print(_style(f"\n{text}:\n", "heading", use_color))
 
 
-def print_row(text: str, *, use_color: bool) -> None:
+def print_row(text: str, *, use_color: bool, theme: CliTheme | None = None) -> None:
+    if theme is not None:
+        print(theme.stylize(text, "primary"))
+        return
     print(_style(text, "row", use_color))
 
 
-def print_success(text: str, *, use_color: bool) -> None:
+def print_success(text: str, *, use_color: bool, theme: CliTheme | None = None) -> None:
+    if theme is not None:
+        theme.emit(text, "success")
+        return
     print(_style(text, "success", use_color))
 
 
-def print_error(text: str, *, use_color: bool) -> None:
+def print_error(text: str, *, use_color: bool, theme: CliTheme | None = None) -> None:
+    if theme is not None:
+        theme.emit(text, "error")
+        return
     print(_style(text, "error", use_color))
 
 
-def print_hint(text: str, *, use_color: bool) -> None:
+def print_hint(text: str, *, use_color: bool, theme: CliTheme | None = None) -> None:
+    if theme is not None:
+        theme.emit(text, "muted")
+        return
     print(_style(text, "hint", use_color))
 
 
@@ -68,20 +84,20 @@ def _render_help_panel() -> None:
     panel_x = max(1, width - panel_width + 1)
     panel_lines = [
         "Trainer help",
-        "• n/p: paginate controls",
-        "• f: filter controls by text",
-        "• d: view full control details",
-        "• number: test action on control",
-        "• s: save workflow to JSON",
-        "• q: quit trainer",
+        "\u2022 n/p: paginate controls",
+        "\u2022 f: filter controls by text",
+        "\u2022 d: view full control details",
+        "\u2022 number: test action on control",
+        "\u2022 s: save workflow to JSON",
+        "\u2022 q: quit trainer",
     ]
 
-    top = "┌" + ("─" * (panel_width - 2)) + "┐"
-    bottom = "└" + ("─" * (panel_width - 2)) + "┘"
+    top = "\u250c" + ("\u2500" * (panel_width - 2)) + "\u2510"
+    bottom = "\u2514" + ("\u2500" * (panel_width - 2)) + "\u2518"
     boxed = [top]
     for line in panel_lines:
         text = line[: panel_width - 4]
-        boxed.append(f"│ {text:<{panel_width - 4}} │")
+        boxed.append(f"\u2502 {text:<{panel_width - 4}} \u2502")
     boxed.append(bottom)
 
     for row, line in enumerate(boxed, start=1):
@@ -89,18 +105,27 @@ def _render_help_panel() -> None:
     print("\033[11;1H", end="")
 
 
-def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
+def run_trainer(
+    backend: str = "win32",
+    no_color: bool = False,
+    theme: CliTheme | None = None,
+) -> int:
     use_color = _should_use_color(no_color)
+    ui = theme or build_theme("minimal" if no_color else None)
     windows = list_windows(backend=backend, include_hidden=False)
     if not windows:
         windows = list_windows(backend=backend, include_hidden=True)
     if not windows:
-        print_error("No windows found.", use_color=use_color)
+        print_error("No windows found.", use_color=use_color, theme=ui)
         return 1
 
-    print_heading("Open windows", use_color=use_color)
+    print_heading("Open windows", use_color=use_color, theme=ui)
     if backend == "win32":
-        print_hint("Tip: If controls look empty on Windows 11, retry with '--backend uia'.", use_color=use_color)
+        print_hint(
+            "Tip: If controls look empty on Windows 11, retry with '--backend uia'.",
+            use_color=use_color,
+            theme=ui,
+        )
     _print_window_menu(windows)
 
     selected_index = _prompt_pick_index(windows, "\nSelect window number: ", "Invalid selection.")
@@ -111,7 +136,7 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
     wrapper = selected_window["wrapper"]
     controls = list_controls(wrapper)
     if not controls:
-        print_error("No controls found.", use_color=use_color)
+        print_error("No controls found.", use_color=use_color, theme=ui)
         return 1
 
     workflow_steps: list[dict] = []
@@ -128,8 +153,8 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
         if _supports_ansi_cursor():
             print("\033[2J\033[H", end="")
             _render_help_panel()
-        print_heading("Controls", use_color=use_color)
-        _print_controls_menu(filtered_controls, page, page_size, filter_text, max_items)
+        print_heading("Controls", use_color=use_color, theme=ui)
+        _print_controls_menu(filtered_controls, page, page_size, filter_text, max_items, theme=ui)
 
         choice = input(
             "\nSelect control index | commands: [n]ext [p]rev [f]ilter [d]etails [s]ave [q]uit: "
@@ -137,10 +162,10 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
         lowered = choice.lower()
 
         if lowered == "q":
-            print_hint("Exiting trainer.", use_color=use_color)
+            print_hint("Exiting trainer.", use_color=use_color, theme=ui)
             return 0
         if lowered == "s":
-            return _save_workflow(backend, selected_window, workflow_steps, use_color=use_color)
+            return _save_workflow(backend, selected_window, workflow_steps, use_color=use_color, theme=ui)
         if lowered == "n":
             if page < total_pages - 1:
                 page += 1
@@ -158,25 +183,25 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
             if details_index is None:
                 continue
             details = control_to_dict(controls[details_index])
-            print_heading("Control details", use_color=use_color)
+            print_heading("Control details", use_color=use_color, theme=ui)
             for key, value in details.items():
-                print_row(f"- {key}: {value}", use_color=use_color)
+                print_row(f"- {key}: {value}", use_color=use_color, theme=ui)
             continue
 
         try:
             selected_control_index = int(choice)
             control = controls[selected_control_index]
         except Exception:
-            print_error("Invalid control selection.", use_color=use_color)
+            print_error("Invalid control selection.", use_color=use_color, theme=ui)
             continue
 
         control_meta = control_to_dict(control)
-        print_heading("Control details", use_color=use_color)
+        print_heading("Control details", use_color=use_color, theme=ui)
         for key, value in control_meta.items():
-            print_row(f"- {key}: {value}", use_color=use_color)
+            print_row(f"- {key}: {value}", use_color=use_color, theme=ui)
 
-        print_heading("Actions", use_color=use_color)
-        _print_action_menu()
+        print_heading("Actions", use_color=use_color, theme=ui)
+        _print_action_menu(theme=ui)
 
         raw_action = input("Choose action number (or blank to cancel): ").strip()
         if not raw_action:
@@ -184,7 +209,7 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
         try:
             action = SUPPORTED_ACTIONS[int(raw_action) - 1]
         except Exception:
-            print_error("Invalid action.", use_color=use_color)
+            print_error("Invalid action.", use_color=use_color, theme=ui)
             continue
 
         value = None
@@ -193,9 +218,9 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
 
         try:
             result = perform_action(control, action, value)
-            print_success(f"Action completed: {result}", use_color=use_color)
+            print_success(f"Action completed: {result}", use_color=use_color, theme=ui)
         except Exception as exc:
-            print_error(f"Action failed: {exc}", use_color=use_color)
+            print_error(f"Action failed: {exc}", use_color=use_color, theme=ui)
             continue
 
         should_add = input("Add action to workflow? [y/N]: ").strip().lower()
@@ -232,11 +257,22 @@ def run_trainer(backend: str = "win32", no_color: bool = False) -> int:
                 },
             )
         )
-        print_success(f"Step saved in session. Total steps: {len(workflow_steps)}", use_color=use_color)
+        print_success(
+            f"Step saved in session. Total steps: {len(workflow_steps)}",
+            use_color=use_color,
+            theme=ui,
+        )
 
-def _save_workflow(backend: str, selected_window: dict, workflow_steps: list, *, use_color: bool) -> int:
+def _save_workflow(
+    backend: str,
+    selected_window: dict,
+    workflow_steps: list,
+    *,
+    use_color: bool,
+    theme: CliTheme | None = None,
+) -> int:
     if not workflow_steps:
-        print_error("No workflow steps collected. Nothing to save.", use_color=use_color)
+        print_error("No workflow steps collected. Nothing to save.", use_color=use_color, theme=theme)
         return 0
 
     output_dir = input("Export output directory [exports]: ").strip() or "exports"
@@ -255,7 +291,7 @@ def _save_workflow(backend: str, selected_window: dict, workflow_steps: list, *,
     config["workflow"] = workflow_steps
 
     save_json(config_path, config, base_dir=Path.cwd())
-    print_success(f"Saved workflow to {config_path}", use_color=use_color)
+    print_success(f"Saved workflow to {config_path}", use_color=use_color, theme=theme)
     return 0
 
 
@@ -275,17 +311,14 @@ def _menu_icons() -> dict[str, str]:
         "error": "[X]",
         "pointer": "->",
     }
-    fancy = {
-        "ok": "✅",
-        "warn": "⚠️",
-        "error": "❌",
-        "pointer": "👉",
-    }
-    try:
-        "".join(fancy.values()).encode("utf-8")
-    except Exception:
+    if not _advanced_menu_available():
         return fallback
-    return fancy
+    return {
+        "ok": "\u2705",
+        "warn": "\u26a0\ufe0f",
+        "error": "\u274c",
+        "pointer": "\U0001f449",
+    }
 
 
 def _advanced_menu_available() -> bool:
@@ -316,9 +349,13 @@ def _print_window_menu(windows: list[dict]) -> None:
         )
 
 
-def _print_action_menu() -> None:
+def _print_action_menu(theme: CliTheme | None = None) -> None:
     icons = _menu_icons()
-    print(f"\n{icons['pointer']} Action picker")
+    label = f"\n{icons['pointer']} Action picker"
+    if theme is not None:
+        print(theme.stylize(label, "accent"))
+    else:
+        print(label)
     for idx, action in enumerate(SUPPORTED_ACTIONS, start=1):
         print(f"[{idx:>2}] {action}")
 
@@ -348,9 +385,14 @@ def _print_controls_menu(
     page_size: int,
     filter_text: str,
     max_items: int,
+    theme: CliTheme | None = None,
 ) -> None:
     icons = _menu_icons()
-    print(f"{icons['pointer']} Control picker")
+    label = f"{icons['pointer']} Control picker"
+    if theme is not None:
+        print(theme.stylize(label, "accent"))
+    else:
+        print(label)
     if filter_text:
         print(f"Filter: '{filter_text}'")
     total = len(filtered_controls)
@@ -384,6 +426,6 @@ def _print_controls_menu(
 def _trim(text: str, width: int) -> str:
     if len(text) <= width:
         return text
-    if width <= 1:
+    if width <= 3:
         return text[:width]
-    return f"{text[: width - 1]}…"
+    return f"{text[: width - 3]}..."
